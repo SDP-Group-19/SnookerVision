@@ -36,8 +36,8 @@ def build_masks(hsv: np.ndarray):
     upper_red2 = np.array([180, 255, 255])
 
     # White: low saturation, high value.
-    lower_white = np.array([0, 0, 200])
-    upper_white = np.array([180, 40, 255])
+    lower_white = np.array([0, 0, 100])
+    upper_white = np.array([180, 80, 255])
 
     # Black: low value.
     lower_black = np.array([0, 0, 0])
@@ -98,6 +98,13 @@ def main() -> None:
         cap = cv2.VideoCapture(args.video)
         if not cap.isOpened():
             raise SystemExit(f"Could not open video {args.video}")
+
+    cv2.namedWindow("Ball Tracker", cv2.WINDOW_NORMAL)
+
+    if args.show_mask:
+        cv2.namedWindow("Red Mask", cv2.WINDOW_NORMAL)
+        cv2.namedWindow("White Mask", cv2.WINDOW_NORMAL)
+        cv2.namedWindow("Black Mask", cv2.WINDOW_NORMAL)
 
     last_time = time.time()
     fps = 0.0
