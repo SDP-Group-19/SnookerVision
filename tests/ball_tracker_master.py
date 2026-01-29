@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=1280, help="Capture width (camera only)")
     parser.add_argument("--height", type=int, default=720, help="Capture height (camera only)")
     parser.add_argument("--min-area", type=int, default=150, help="Minimum contour area for detection")
-    parser.add_argument("--circularity", type=float, default=0.65, help="Min circularity (0-1)")
+    parser.add_argument("--circularity", type=float, default=0.85, help="Min circularity (0-1)")
     parser.add_argument("--show-mask", action="store_true", help="Show threshold mask windows")
     return parser.parse_args()
 
@@ -36,8 +36,8 @@ def build_masks(hsv: np.ndarray):
     upper_red2 = np.array([180, 255, 255])
 
     # White: low saturation, high value.
-    lower_white = np.array([0, 0, 100])
-    upper_white = np.array([180, 80, 255])
+    lower_white = np.array([0, 0, 0])
+    upper_white = np.array([180, 120, 255])
 
     # Black: low value.
     lower_black = np.array([0, 0, 0])
