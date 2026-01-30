@@ -108,6 +108,14 @@ class RuleEngine:
             foul = True
             foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[0]])
 
+        if (ctx.first_contact[1] != BallType.RED) and (s.target == "RED"):
+            foul = True
+            foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
+
+        if (ctx.first_contact[1] == BallType.RED) and (s.target == "COLOR"):
+            foul = True
+            foul_points = max(foul_points, 4)
+
         if foul:
             opponent = 1 - s.turn
             s.score[opponent] += foul_points
