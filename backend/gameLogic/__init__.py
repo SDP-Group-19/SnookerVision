@@ -122,6 +122,10 @@ class RuleEngine:
             s.turn = opponent
             out.append(f"FOUL +{foul_points} to P{opponent+1}, turn -> P{s.turn+1}")
             # target stays same in MVP
+
+            # target should return to red no?
+            s.target = "RED"
+
             return out
 
         # scoring: sum of potted (simplified)
@@ -132,9 +136,16 @@ class RuleEngine:
         # turn logic (simplified): continue if potted any, else switch
         if gained == 0:
             s.turn = 1 - s.turn
+            # target should return to red no?
+            s.target = "RED"
             out.append(f"NO_POT: turn -> P{s.turn+1}")
         else:
             out.append(f"CONTINUE: P{s.turn+1} keeps turn")
+            # target should alternate.
+            if s.target == "RED":
+                s.target = "COLOR"
+            else:
+                s.target = "RED"
 
         return out
 
@@ -144,6 +155,14 @@ events = [
     Event(time.time(), EventType.SHOT_START),
     Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.RED}),
     Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.RED}),
+    Event(time.time(), EventType.SHOT_END),
+    Event(time.time(), EventType.SHOT_START),
+    Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.BLACK}),
+    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.BLACK}),
+    Event(time.time(), EventType.SHOT_END),
+    Event(time.time(), EventType.SHOT_START),
+    Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.BLACK}),
+    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.BLACK}),
     Event(time.time(), EventType.SHOT_END),
 ]
 
