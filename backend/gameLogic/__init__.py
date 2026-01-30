@@ -1,7 +1,7 @@
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple
 
 class BallType(Enum):
     RED = auto()
@@ -103,6 +103,10 @@ class RuleEngine:
         if ctx.first_contact is None:
             foul = True
             foul_points = max(foul_points, 4)
+
+        if ctx.first_contact[0] != BallType.CUE:
+            foul = True
+            foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[0]])
 
         if foul:
             opponent = 1 - s.turn
