@@ -13,6 +13,15 @@ class BallType(Enum):
     BLACK = auto()
     CUE = auto()
 
+BALL_ORDER = [
+    "YELLOW",
+    "GREEN",
+    "BROWN",
+    "BLUE",
+    "PINK",
+    "BLACK"
+]
+
 BALL_VALUE = {
     BallType.RED: 1,
     BallType.YELLOW: 2,
@@ -29,6 +38,7 @@ class EventType(Enum):
     SHOT_END = auto()
     FIRST_CONTACT = auto()
     BALL_POTTED = auto()
+    NO_REDS_REMAINING = auto()
 
 @dataclass
 class Event:
@@ -66,6 +76,7 @@ class FrameState:
     turn: int = 0  # 0 for P1, 1 for P2
     score: List[int] = field(default_factory=lambda: [0, 0])
     # YELLOW, GREEN, BROWN, BLUE... ---> WHEN REDS ARE GONE
+    colourClearance: bool = False # for when reds are gone
     target: str = "RED"  # "RED" or "COLOR" (simplify)
     phase: Phase = Phase.IDLE
     ctx: ShotContext = field(default_factory=ShotContext)
@@ -85,6 +96,10 @@ class RuleEngine:
             fs.ctx = ShotContext()
             outputs.append("SHOT_START")
 
+        elif e.type == EventType.NO_REDS_REMAINING and fs.phase == Phase.IDLE:
+            outputs.append("NO_REDS_REMAINING")
+            fs.colourClearance = True
+
         elif e.type == EventType.FIRST_CONTACT and fs.phase == Phase.IN_SHOT:
             if fs.ctx.first_contact is None:
                 fs.ctx.first_contact = (e.data["a"], e.data["b"])
@@ -103,6 +118,21 @@ class RuleEngine:
             fs.phase = Phase.IDLE
 
         return outputs
+
+    def _next_target(self):
+        """
+        LOGIC TO DECIDE NEXT SHOT TARGET,
+        SHOULD USE BALL_ORDER
+        """
+
+        fs = self.frameState
+
+        if fs.target in BALL_ORDER:
+            index = BALL_ORDER.index(fs.target)
+            index += 1 # get next colour in sequence
+            if index < len(BALL_ORDER):
+                fs.target = BALL_ORDER[index]
+
 
     def _resolve_shot(self) -> List[str]:
         gs = self.gameState
