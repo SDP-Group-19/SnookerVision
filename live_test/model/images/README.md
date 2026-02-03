@@ -14,15 +14,15 @@ Each member should label ONLY the images inside their own folder.
 ## For Each Member
 James:
 - Open images: `live_test/model/images/James`
-- Save labels: `live_test/model/labels/James`
+- Save labels: `live_test/model/labels/train`
 
 Kasper:
 - Open images: `live_test/model/images/Kasper`
-- Save labels: `live_test/model/labels/Kasper`
+- Save labels: `live_test/model/labels/train`
 
 William:
 - Open images: `live_test/model/images/William`
-- Save labels: `live_test/model/labels/William`
+- Save labels: `live_test/model/labels/train`
 
 ## Labeling Workflow
 1. `Open Dir` and choose your images folder.
