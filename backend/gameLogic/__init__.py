@@ -39,6 +39,7 @@ class EventType(Enum):
     FIRST_CONTACT = auto()
     BALL_POTTED = auto()
     NO_REDS_REMAINING = auto()
+    GAME_FORFEITED = auto()
 
 @dataclass
 class Event:
@@ -57,19 +58,15 @@ class Phase(Enum):
     IN_SHOT = auto()
 
 '''
-- TODO PAUSE GAME ON FOUL TO REQUEST PLAYER IF THEY WANT TO FORCE 
-OPPONENT TO RETAKE SHOT
-- END GAME WHEN DIFFERENCE OF > 7 POINTS, WHEN BLACK IS ONLY BALL LEFT
-- SET AMOUNT OF FRAMES/GAMES
-- PLAYER STARTING ALTERNATES BETWEEN FRAMES
-- COLOURS MUST BE POT IN ASCENDING ORDER AFTER REDS ARE GONE
+COLOURS MUST BE POT IN ASCENDING ORDER AFTER REDS ARE GONE
 '''
 
 @dataclass
-class GameState:
+class GameState: # PROBABLY JUST GOING TO LEAVE FOR NOW
     games: int = 1 # default 1 for now
     frames: int = 3 # default 3 for now
     firstTurn: int = 0 # player who starts first
+    score: List[Tuple[int,int]] = field(default_factory=lambda: [(0,0),(0,0)]) #(games, frames)
 
 @dataclass
 class FrameState:
@@ -100,6 +97,10 @@ class RuleEngine:
             outputs.append("NO_REDS_REMAINING")
             fs.colourClearance = True
 
+        elif e.type == EventType.GAME_FORFEITED and fs.phase == Phase.IDLE:
+            outputs.append("GAME_FORFEITED")
+            outputs.extend(self._process_winner(e.data["player"]))
+
         elif e.type == EventType.FIRST_CONTACT and fs.phase == Phase.IN_SHOT:
             if fs.ctx.first_contact is None:
                 fs.ctx.first_contact = (e.data["a"], e.data["b"])
@@ -119,7 +120,15 @@ class RuleEngine:
 
         return outputs
 
-    def _next_target(self):
+    def _process_winner(self, winner: int) -> list[str]:
+        gs = self.gameState
+        fs = self.frameState
+
+        out: List[str] = [f"WINNER PLAYER: {winner}"]
+
+        return out
+
+    def _process_target(self):
         """
         LOGIC TO DECIDE NEXT SHOT TARGET,
         SHOULD USE BALL_ORDER
@@ -127,6 +136,14 @@ class RuleEngine:
 
         fs = self.frameState
 
+        #normal play
+        if not fs.colourClearance:
+            if fs.target == "RED":
+                fs.target = "COLOUR"
+            elif fs.target == "COLOUR":
+                fs.target = "RED"
+
+        #no reds
         if fs.target in BALL_ORDER:
             index = BALL_ORDER.index(fs.target)
             index += 1 # get next colour in sequence
@@ -171,10 +188,6 @@ class RuleEngine:
             fs.turn = opponent
             out.append(f"FOUL +{foul_points} to P{opponent+1}, turn -> P{fs.turn+1}")
             # target stays same in MVP
-
-            # target should return to red no?
-            fs.target = "RED"
-
             return out
 
         # scoring: sum of potted (simplified)
@@ -190,11 +203,7 @@ class RuleEngine:
             out.append(f"NO_POT: turn -> P{fs.turn+1}")
         else:
             out.append(f"CONTINUE: P{fs.turn+1} keeps turn")
-            # target should alternate.
-            if fs.target == "RED":
-                fs.target = "COLOR"
-            else:
-                fs.target = "RED"
+            self._process_target()
 
         return out
 
@@ -213,6 +222,7 @@ events = [
     Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.BLACK}),
     Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.BLACK}),
     Event(time.time(), EventType.SHOT_END),
+    EventType(time.time(), EventType.NO_REDS_REMAINING),
 ]
 
 for e in events:
