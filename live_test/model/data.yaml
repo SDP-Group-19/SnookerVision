@@ -1,0 +1,17 @@
+# Snooker ball detection dataset
+# Update paths if your images/labels live elsewhere.
+path: ../datasets/snooker
+train: images/train
+val: images/val
+# Optional test split
+# test: images/test
+
+names:
+  0: white
+  1: red
+  2: yellow
+  3: green
+  4: brown
+  5: blue
+  6: pink
+  7: black
