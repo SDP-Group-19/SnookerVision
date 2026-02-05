@@ -1,8 +1,7 @@
-white
 red
-yellow
 green
+yellow
+white
+black
 brown
 blue
-pink
-black
