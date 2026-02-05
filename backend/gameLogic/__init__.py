@@ -40,6 +40,7 @@ class EventType(Enum):
     BALL_POTTED = auto()
     NO_REDS_REMAINING = auto()
     GAME_FORFEITED = auto()
+    NO_BALLS_REMAINING = auto()
 
 @dataclass
 class Event:
@@ -108,7 +109,7 @@ class FrameState:
             self.activePlayer.target = "RED"
 
         #COLOUR CLEARANCE
-        if not justPotRed and self.colourClearance:
+        if not justPotRed and self.colourClearance and (len(self.tempBallOrder) > 0):
             self.activePlayer.target = self.tempBallOrder[0] #ensure it's not empty
         if justPotRed and self.colourClearance:
             self.activePlayer.target = "COLOUR"
@@ -138,6 +139,9 @@ class RuleEngine:
         elif e.type == EventType.GAME_FORFEITED and fs.phase == Phase.IDLE:
             pass
 
+        elif e.type == EventType.NO_BALLS_REMAINING and fs.phase == Phase.IDLE:
+            gs.end_frame()
+
         elif e.type == EventType.FIRST_CONTACT and fs.phase == Phase.IN_SHOT:
             if fs.ctx.first_contact is None:
                 fs.ctx.first_contact = (e.data["a"], e.data["b"])
@@ -164,7 +168,7 @@ class RuleEngine:
         out: List[str] = []
 
         foul = False
-        foul_points = 0
+        foul_points = 4
 
         # MVP foul: cue ball potted
         if ctx.cue_potted:
@@ -187,6 +191,62 @@ class RuleEngine:
             if (ctx.first_contact[1] == BallType.RED) and (fs.activePlayer.target == "COLOUR"):
                 foul = True
                 foul_points = max(foul_points, 4)
+
+            if (ctx.first_contact[1] != BallType.YELLOW) and (fs.activePlayer.target == "YELLOW"):
+                foul = True
+                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
+
+            if (ctx.first_contact[1] != BallType.GREEN) and (fs.activePlayer.target == "GREEN"):
+                foul = True
+                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
+
+            if (ctx.first_contact[1] != BallType.BROWN) and (fs.activePlayer.target == "BROWN"):
+                foul = True
+                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
+
+            if (ctx.first_contact[1] != BallType.BLUE) and (fs.activePlayer.target == "BLUE"):
+                foul = True
+                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
+
+            if (ctx.first_contact[1] != BallType.PINK) and (fs.activePlayer.target == "PINK"):
+                foul = True
+                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
+
+            if (ctx.first_contact[1] != BallType.BLACK) and (fs.activePlayer.target == "BLACK"):
+                foul = True
+                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
+
+            if (any(b != BallType.RED for b in fs.ctx.potted)) and (fs.activePlayer.target == "RED"):
+                for b in fs.ctx.potted:
+                    foul_points = max(foul_points, BALL_VALUE[b]) # foul is value of highest ball
+
+            if (len(ctx.potted) > 1) and (fs.activePlayer.target == "COLOUR"):
+                for b in fs.ctx.potted:
+                    foul_points = max(foul_points, BALL_VALUE[b])
+
+            if (any(b != BallType.YELLOW for b in fs.ctx.potted)) and (fs.activePlayer.target == "YELLOW"):
+                for b in fs.ctx.potted:
+                    foul_points = max(foul_points, BALL_VALUE[b])
+
+            if (any(b != BallType.GREEN for b in fs.ctx.potted)) and (fs.activePlayer.target == "GREEN"):
+                for b in fs.ctx.potted:
+                    foul_points = max(foul_points, BALL_VALUE[b])
+
+            if (any(b != BallType.BROWN for b in fs.ctx.potted)) and (fs.activePlayer.target == "BROWN"):
+                for b in fs.ctx.potted:
+                    foul_points = max(foul_points, BALL_VALUE[b])
+
+            if (any(b != BallType.BLUE for b in fs.ctx.potted)) and (fs.activePlayer.target == "BLUE"):
+                for b in fs.ctx.potted:
+                    foul_points = max(foul_points, BALL_VALUE[b])
+
+            if (any(b != BallType.PINK for b in fs.ctx.potted)) and (fs.activePlayer.target == "PINK"):
+                for b in fs.ctx.potted:
+                    foul_points = max(foul_points, BALL_VALUE[b])
+
+            if (any(b != BallType.BLACK for b in fs.ctx.potted)) and (fs.activePlayer.target == "BLACK"):
+                for b in fs.ctx.potted:
+                    foul_points = max(foul_points, BALL_VALUE[b])
 
         if foul:
             fs.opponent.score += foul_points
@@ -243,6 +303,31 @@ events = [
     Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.RED}),
     Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.RED}),
     Event(time.time(), EventType.SHOT_END),
+    Event(time.time(), EventType.SHOT_START),
+    Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.YELLOW}),
+    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.YELLOW}),
+    Event(time.time(), EventType.SHOT_END),
+    Event(time.time(), EventType.SHOT_START),
+    Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.GREEN}),
+    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.GREEN}),
+    Event(time.time(), EventType.SHOT_END),
+    Event(time.time(), EventType.SHOT_START),
+    Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.BROWN}),
+    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.BROWN}),
+    Event(time.time(), EventType.SHOT_END),
+    Event(time.time(), EventType.SHOT_START),
+    Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.BLUE}),
+    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.BLUE}),
+    Event(time.time(), EventType.SHOT_END),
+    Event(time.time(), EventType.SHOT_START),
+    Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.PINK}),
+    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.PINK}),
+    Event(time.time(), EventType.SHOT_END),
+    Event(time.time(), EventType.SHOT_START),
+    Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.BLACK}),
+    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.BLACK}),
+    Event(time.time(), EventType.SHOT_END),
+    Event(time.time(), EventType.NO_BALLS_REMAINING),
 ]
 
 for e in events:
