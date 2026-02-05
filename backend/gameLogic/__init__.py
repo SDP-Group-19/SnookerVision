@@ -68,6 +68,39 @@ class Player:
     target: str = "RED"  # "RED" or "COLOUR" (simplify)
 
 @dataclass
+class FrameState:
+    activePlayer: Player = field()
+    opponent: Player = field()
+    tempBallOrder: List[str] = field(default_factory=lambda: BALL_ORDER.copy())
+    colourClearance: bool = False # for when reds are gone
+    phase: Phase = Phase.IDLE
+    ctx: ShotContext = field(default_factory=ShotContext)
+
+    def swap_players(self):
+        self.activePlayer, self.opponent = self.opponent, self.activePlayer
+
+        #reset player target
+        if not self.colourClearance:
+            self.activePlayer.target = "RED"
+        else:
+            self.activePlayer.target = self.tempBallOrder[0] #ensure it's not empty
+
+    def get_next_target(self, justPotRed: bool):
+        #NORMAL PLAY
+        if justPotRed and not self.colourClearance:
+            self.activePlayer.target = "COLOUR"
+        if not justPotRed and not self.colourClearance:
+            self.activePlayer.target = "RED"
+
+        #COLOUR CLEARANCE
+        if not justPotRed and self.colourClearance and (len(self.tempBallOrder) > 0):
+            self.activePlayer.target = self.tempBallOrder[0] #ensure it's not empty
+        if justPotRed and self.colourClearance:
+            self.activePlayer.target = "COLOUR"
+
+        print(f"TEST NEXT TARGET: {self.activePlayer.target}")
+
+@dataclass
 class GameState: # PROBABLY JUST GOING TO LEAVE FOR NOW
     games: int = 1 # default 1 for now
     frames: int = 1 # default 3 for now
@@ -121,38 +154,7 @@ class GameState: # PROBABLY JUST GOING TO LEAVE FOR NOW
         print(f"{self.player1.name} score: {self.player1.score}")
         print(f"{self.player2.name} score: {self.player2.score}")
 
-@dataclass
-class FrameState:
-    activePlayer: Player = field()
-    opponent: Player = field()
-    tempBallOrder: List[str] = field(default_factory=lambda: BALL_ORDER.copy())
-    colourClearance: bool = False # for when reds are gone
-    phase: Phase = Phase.IDLE
-    ctx: ShotContext = field(default_factory=ShotContext)
 
-    def swap_players(self):
-        self.activePlayer, self.opponent = self.opponent, self.activePlayer
-
-        #reset player target
-        if not self.colourClearance:
-            self.activePlayer.target = "RED"
-        else:
-            self.activePlayer.target = self.tempBallOrder[0] #ensure it's not empty
-
-    def get_next_target(self, justPotRed: bool):
-        #NORMAL PLAY
-        if justPotRed and not self.colourClearance:
-            self.activePlayer.target = "COLOUR"
-        if not justPotRed and not self.colourClearance:
-            self.activePlayer.target = "RED"
-
-        #COLOUR CLEARANCE
-        if not justPotRed and self.colourClearance and (len(self.tempBallOrder) > 0):
-            self.activePlayer.target = self.tempBallOrder[0] #ensure it's not empty
-        if justPotRed and self.colourClearance:
-            self.activePlayer.target = "COLOUR"
-
-        print(f"TEST NEXT TARGET: {self.activePlayer.target}")
 
 
 class RuleEngine:
