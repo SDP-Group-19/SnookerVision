@@ -1,7 +1,6 @@
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from idlelib.autocomplete import TRY_A
 from typing import List, Optional, Tuple
 
 class BallType(Enum):
@@ -75,19 +74,36 @@ class GameState: # PROBABLY JUST GOING TO LEAVE FOR NOW
     player1: Player = field(default_factory=lambda: Player("Player1"))
     player2: Player = field(default_factory=lambda: Player("Player2"))
     firstTurn: Player = field(init=False) # player who starts first
+    current_frame: FrameState | None = field(init=False, default=None)
 
     def __post_init__(self):
         self.firstTurn = self.player1
 
+    def start_frame(self):
+        self.current_frame = FrameState(
+            activePlayer=self.firstTurn,
+            opponent=self.player2 if self.firstTurn is self.player1 else self.player1
+        )
+
     def end_frame(self): # FOR NOW WERE ONLY PLAYING 1 FRAME AS MVP
         print("GAME HAS ENDED")
+        print("Final scores")
+        print(f"{self.player1.name} score: {self.player1.score}")
+        print(f"{self.player2.name} score: {self.player2.score}")
+
+    def forfeit_frame(self, forfeitPlayer: Player):
+        print("GAME HAS BEEN FORFEIT")
+        print(f"{forfeitPlayer.name} FORFEIT")
+        print("Final scores")
+        print(f"{self.player1.name} score: {self.player1.score}")
+        print(f"{self.player2.name} score: {self.player2.score}")
 
 @dataclass
 class FrameState:
+    activePlayer: Player = field()
+    opponent: Player = field()
     tempBallOrder: List[str] = field(default_factory=lambda: BALL_ORDER.copy())
     colourClearance: bool = False # for when reds are gone
-    activePlayer: Player = field(default_factory=lambda: Player("Player1"))
-    opponent: Player = field(default_factory=lambda: Player("Player2"))
     phase: Phase = Phase.IDLE
     ctx: ShotContext = field(default_factory=ShotContext)
 
@@ -119,13 +135,12 @@ class FrameState:
 
 
 class RuleEngine:
-    def __init__(self) -> None:
-        self.gameState = GameState()
-        self.frameState = FrameState()
+    def __init__(self, gameState: GameState) -> None:
+        self.gameState = gameState
 
     def on_event(self, e: Event) -> List[str]:
         gs = self.gameState
-        fs = self.frameState
+        fs = gs.current_frame
         outputs: List[str] = []
 
         if e.type == EventType.SHOT_START and fs.phase == Phase.IDLE:
@@ -138,7 +153,10 @@ class RuleEngine:
             fs.colourClearance = True
 
         elif e.type == EventType.GAME_FORFEITED and fs.phase == Phase.IDLE:
-            pass
+            if e.data["player"] == 1:
+                gs.forfeit_frame(gs.player1)
+            else:
+                gs.forfeit_frame(gs.player2)
 
         elif e.type == EventType.NO_BALLS_REMAINING and fs.phase == Phase.IDLE:
             gs.end_frame()
@@ -164,7 +182,7 @@ class RuleEngine:
 
     def _resolve_shot(self) -> List[str]:
         gs = self.gameState
-        fs = self.frameState
+        fs = gs.current_frame
         ctx = fs.ctx
         out: List[str] = []
 
@@ -288,12 +306,15 @@ class RuleEngine:
 
         return out
 
-engine = RuleEngine()
+
+gs = GameState()
+gs.start_frame()
+engine = RuleEngine(gs)
 
 events = [
     Event(time.time(), EventType.SHOT_START),
     Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.RED}),
-    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.BLACK}),
+    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.RED}),
     Event(time.time(), EventType.SHOT_END),
     Event(time.time(), EventType.SHOT_START),
     Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.BLACK}),
@@ -336,13 +357,10 @@ events = [
     Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.BLACK}),
     Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.BLACK}),
     Event(time.time(), EventType.SHOT_END),
-    Event(time.time(), EventType.NO_BALLS_REMAINING),
+    Event(time.time(), EventType.GAME_FORFEITED, {"player": 2}),
+
 ]
 
 for e in events:
     for msg in engine.on_event(e):
         print(msg)
-
-print("Final scores")
-print(f"{engine.frameState.activePlayer.name} score: {engine.frameState.activePlayer.score}")
-print(f"{engine.frameState.opponent.name} score: {engine.frameState.opponent.score}")
