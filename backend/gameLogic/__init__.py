@@ -57,26 +57,64 @@ class Phase(Enum):
     IDLE = auto()
     IN_SHOT = auto()
 
-'''
-COLOURS MUST BE POT IN ASCENDING ORDER AFTER REDS ARE GONE
-'''
+@dataclass
+class Player:
+    name: str
+    gamesWon: int = 0
+    framesWon: int = 0
+    score: int = 0
+    # YELLOW, GREEN, BROWN, BLUE... ---> WHEN REDS ARE GONE
+    target: str = "RED"  # "RED" or "COLOUR" (simplify)
 
 @dataclass
 class GameState: # PROBABLY JUST GOING TO LEAVE FOR NOW
     games: int = 1 # default 1 for now
     frames: int = 3 # default 3 for now
-    firstTurn: int = 0 # player who starts first
-    score: List[Tuple[int,int]] = field(default_factory=lambda: [(0,0),(0,0)]) #(games, frames)
+    player1: Player = field(default_factory=lambda: Player("Player1"))
+    player2: Player = field(default_factory=lambda: Player("Player2"))
+    firstTurn: Player = field(init=False) # player who starts first
+
+    def __post_init__(self):
+        self.firstTurn = self.player1
+
+    def end_frame(self): # FOR NOW WERE ONLY PLAYING 1 FRAME AS MVP
+        print("GAME HAS ENDED")
 
 @dataclass
 class FrameState:
-    turn: int = 0  # 0 for P1, 1 for P2
-    score: List[int] = field(default_factory=lambda: [0, 0])
-    # YELLOW, GREEN, BROWN, BLUE... ---> WHEN REDS ARE GONE
+    tempBallOrder: List[str] = field(default_factory=lambda: BALL_ORDER.copy())
     colourClearance: bool = False # for when reds are gone
-    target: str = "RED"  # "RED" or "COLOR" (simplify)
+    activePlayer: Player = field(default_factory=lambda: Player("Player1"))
+    opponent: Player = field(default_factory=lambda: Player("Player2"))
     phase: Phase = Phase.IDLE
     ctx: ShotContext = field(default_factory=ShotContext)
+
+    def swap_players(self):
+        temp = self.activePlayer
+        self.activePlayer = self.opponent
+        self.opponent = temp
+
+        #reset player target
+        if not self.colourClearance:
+            self.activePlayer.target = "RED"
+        else:
+            self.activePlayer.target = self.tempBallOrder[0] #ensure it's not empty
+
+    def get_next_target(self, justPotRed: bool):
+        #NORMAL PLAY
+        if justPotRed and not self.colourClearance:
+            self.activePlayer.target = "COLOUR"
+        if not justPotRed and not self.colourClearance:
+            self.activePlayer.target = "RED"
+
+        #COLOUR CLEARANCE
+        if not justPotRed and self.colourClearance:
+            self.activePlayer.target = self.tempBallOrder[0] #ensure it's not empty
+        if justPotRed and self.colourClearance:
+            self.activePlayer.target = "COLOUR"
+
+        print(f"TEST CURRENT TARGET: {self.activePlayer.target}")
+
 
 class RuleEngine:
     def __init__(self) -> None:
@@ -98,8 +136,7 @@ class RuleEngine:
             fs.colourClearance = True
 
         elif e.type == EventType.GAME_FORFEITED and fs.phase == Phase.IDLE:
-            outputs.append("GAME_FORFEITED")
-            outputs.extend(self._process_winner(e.data["player"]))
+            pass
 
         elif e.type == EventType.FIRST_CONTACT and fs.phase == Phase.IN_SHOT:
             if fs.ctx.first_contact is None:
@@ -120,37 +157,6 @@ class RuleEngine:
 
         return outputs
 
-    def _process_winner(self, winner: int) -> list[str]:
-        gs = self.gameState
-        fs = self.frameState
-
-        out: List[str] = [f"WINNER PLAYER: {winner}"]
-
-        return out
-
-    def _process_target(self):
-        """
-        LOGIC TO DECIDE NEXT SHOT TARGET,
-        SHOULD USE BALL_ORDER
-        """
-
-        fs = self.frameState
-
-        #normal play
-        if not fs.colourClearance:
-            if fs.target == "RED":
-                fs.target = "COLOUR"
-            elif fs.target == "COLOUR":
-                fs.target = "RED"
-
-        #no reds
-        if fs.target in BALL_ORDER:
-            index = BALL_ORDER.index(fs.target)
-            index += 1 # get next colour in sequence
-            if index < len(BALL_ORDER):
-                fs.target = BALL_ORDER[index]
-
-
     def _resolve_shot(self) -> List[str]:
         gs = self.gameState
         fs = self.frameState
@@ -169,41 +175,47 @@ class RuleEngine:
         if ctx.first_contact is None:
             foul = True
             foul_points = max(foul_points, 4)
+        else:
+            if ctx.first_contact[0] != BallType.CUE:
+                foul = True
+                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[0]])
 
-        if ctx.first_contact[0] != BallType.CUE:
-            foul = True
-            foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[0]])
+            if (ctx.first_contact[1] != BallType.RED) and (fs.activePlayer.target == "RED"):
+                foul = True
+                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
 
-        if (ctx.first_contact[1] != BallType.RED) and (fs.target == "RED"):
-            foul = True
-            foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
-
-        if (ctx.first_contact[1] == BallType.RED) and (fs.target == "COLOR"):
-            foul = True
-            foul_points = max(foul_points, 4)
+            if (ctx.first_contact[1] == BallType.RED) and (fs.activePlayer.target == "COLOUR"):
+                foul = True
+                foul_points = max(foul_points, 4)
 
         if foul:
-            opponent = 1 - fs.turn
-            fs.score[opponent] += foul_points
-            fs.turn = opponent
-            out.append(f"FOUL +{foul_points} to P{opponent+1}, turn -> P{fs.turn+1}")
-            # target stays same in MVP
+            fs.opponent.score += foul_points
+            out.append(f"FOUL +{foul_points} to {fs.opponent.name}")
+
+            fs.swap_players()
             return out
 
         # scoring: sum of potted (simplified)
         gained = sum(BALL_VALUE[b] for b in ctx.potted)
-        fs.score[fs.turn] += gained
-        out.append(f"LEGAL: P{fs.turn+1} +{gained} (score {fs.score})")
+        fs.activePlayer.score += gained
+        out.append(f"LEGAL: {fs.activePlayer.name} +{gained} (score {fs.activePlayer.score})")
 
         # turn logic (simplified): continue if potted any, else switch
         if gained == 0:
-            fs.turn = 1 - fs.turn
-            # target should return to red no?
-            fs.target = "RED"
-            out.append(f"NO_POT: turn -> P{fs.turn+1}")
+            out.append(f"NO_POT: turn -> {fs.opponent.name}")
+            fs.swap_players()
         else:
-            out.append(f"CONTINUE: P{fs.turn+1} keeps turn")
-            self._process_target()
+            out.append(f"CONTINUE: {fs.activePlayer.name} keeps turn")
+            #MUST HAVE POT RED IF NO FOULS AND TARGET WAS RED
+            justPotRed = (fs.activePlayer.target == "RED")
+
+            if not justPotRed and fs.activePlayer.target != "COLOUR" and fs.colourClearance:
+                if fs.tempBallOrder:
+                    fs.tempBallOrder.pop(0) #must have pot the colour in colour clearance
+                if len(fs.tempBallOrder) == 0:
+                    gs.end_frame()
+
+            fs.get_next_target(justPotRed)
 
         return out
 
@@ -219,15 +231,24 @@ events = [
     Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.BLACK}),
     Event(time.time(), EventType.SHOT_END),
     Event(time.time(), EventType.SHOT_START),
+    Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.RED}),
+    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.RED}),
+    Event(time.time(), EventType.SHOT_END),
+    Event(time.time(), EventType.NO_REDS_REMAINING),
+    Event(time.time(), EventType.SHOT_START),
     Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.BLACK}),
     Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.BLACK}),
     Event(time.time(), EventType.SHOT_END),
-    EventType(time.time(), EventType.NO_REDS_REMAINING),
+    Event(time.time(), EventType.SHOT_START),
+    Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.RED}),
+    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.RED}),
+    Event(time.time(), EventType.SHOT_END),
 ]
 
 for e in events:
     for msg in engine.on_event(e):
         print(msg)
 
-print("Final score:", engine.frameState.score)
-print("Turn:", engine.frameState.turn)
+print("Final scores")
+print(f"{engine.frameState.activePlayer.name} score: {engine.frameState.activePlayer.score}")
+print(f"{engine.frameState.opponent.name} score: {engine.frameState.opponent.score}")
