@@ -1,8 +1,8 @@
-yellow
-brown
-white
-green
-blue
-pink
 red
 black
+pink
+blue
+green
+brown
+yellow
+white

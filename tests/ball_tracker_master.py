@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--width", type=int, default=1280, help="Capture width (camera only)")
     parser.add_argument("--height", type=int, default=720, help="Capture height (camera only)")
-    parser.add_argument("--min-area", type=int, default=1300, help="Minimum contour area for detection")
+    parser.add_argument("--min-area", type=int, default=800, help="Minimum contour area for detection")
     parser.add_argument("--circularity", type=float, default=0.83, help="Min circularity (0-1)")
     parser.add_argument("--show-mask", action="store_true", help="Show threshold mask windows")
     parser.add_argument("--text", type=bool, default=False, help="Show the text of circularity and area")
@@ -31,9 +31,9 @@ def parse_args() -> argparse.Namespace:
 
 def build_masks(hsv: np.ndarray):
     # Red wraps around HSV, so we use two ranges.
-    lower_red1 = np.array([0, 120, 70])
-    upper_red1 = np.array([10, 255, 255])
-    lower_red2 = np.array([170, 120, 70])
+    lower_red1 = np.array([170, 180, 70])
+    upper_red1 = np.array([180, 255, 255])
+    lower_red2 = np.array([170, 180, 70])
     upper_red2 = np.array([180, 255, 255])
 
     # White: low saturation, high value.
@@ -44,22 +44,48 @@ def build_masks(hsv: np.ndarray):
     lower_black = np.array([0, 0, 0])
     upper_black = np.array([180, 255, 60])
 
+    # Yellow (黄色): Hue 约为 25-35
+    lower_yellow = np.array([20, 100, 100])
+    upper_yellow = np.array([40, 255, 255])
+
+    # Green (绿色): Hue 约为 50-70
+    lower_green = np.array([65, 220, 130])
+    upper_green = np.array([80, 255, 255])
+
+    # Blue (蓝色): Hue 约为 100-130
+    lower_blue = np.array([80, 130, 180]) 
+    upper_blue = np.array([120, 255, 255])
+
+    # Pink (粉色): Hue 约为 145-165 (接近红色但偏紫)
+    lower_pink = np.array([165, 100, 150]) # 饱和度可以稍低一点
+    upper_pink = np.array([180, 200, 255])
+
+    # Brown (棕色): 本质是暗橙色/暗红色. Hue 10-20, 但亮度(V)要低
+    # 棕色是最难调的，因为它很容易和红色或阴影混淆
+    lower_brown = np.array([10, 150, 120])  
+    upper_brown = np.array([20, 255, 255]) # V 上限限制在 150，太亮就成橙色了
+
+    masks = {}
+
     mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
     mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
-    red_mask = cv2.bitwise_or(mask1, mask2)
+    masks['red'] = cv2.bitwise_or(mask1, mask2)
 
-    white_mask = cv2.inRange(hsv, lower_white, upper_white)
-    black_mask = cv2.inRange(hsv, lower_black, upper_black)
+    masks['white'] = cv2.inRange(hsv, lower_white, upper_white)
+    masks['black'] = cv2.inRange(hsv, lower_black, upper_black)
+    masks['yellow'] = cv2.inRange(hsv, lower_yellow, upper_yellow)
+    masks['green']  = cv2.inRange(hsv, lower_green, upper_green)
+    masks['blue']   = cv2.inRange(hsv, lower_blue, upper_blue)
+    masks['pink']   = cv2.inRange(hsv, lower_pink, upper_pink)
+    masks['brown']  = cv2.inRange(hsv, lower_brown, upper_brown)
 
+    # 形态学操作 (去噪)
     kernel = np.ones((5, 5), np.uint8)
-    red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_OPEN, kernel)
-    red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_CLOSE, kernel)
-    white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_OPEN, kernel)
-    white_mask = cv2.morphologyEx(white_mask, cv2.MORPH_CLOSE, kernel)
-    black_mask = cv2.morphologyEx(black_mask, cv2.MORPH_OPEN, kernel)
-    black_mask = cv2.morphologyEx(black_mask, cv2.MORPH_CLOSE, kernel)
+    for color in masks:
+        masks[color] = cv2.morphologyEx(masks[color], cv2.MORPH_OPEN, kernel)
+        masks[color] = cv2.morphologyEx(masks[color], cv2.MORPH_CLOSE, kernel)
 
-    return red_mask, white_mask, black_mask
+    return masks
 
 
 def find_ball_contours(mask: np.ndarray, min_area: int, min_circularity: float, check_isolation: bool = False):
@@ -162,12 +188,41 @@ def main() -> None:
     cv2.namedWindow("Ball Tracker", cv2.WINDOW_NORMAL)
 
     if args.show_mask:
-        cv2.namedWindow("Red Mask", cv2.WINDOW_NORMAL)
-        cv2.namedWindow("White Mask", cv2.WINDOW_NORMAL)
-        cv2.namedWindow("Black Mask", cv2.WINDOW_NORMAL)
+        # 定义所有需要显示的颜色键值 (与 build_masks 里的 key 对应)
+        all_colors = ['red', 'white', 'black', 'yellow', 'green', 'blue', 'pink', 'brown']
+        
+        for color in all_colors:
+            window_name = f"{color.capitalize()} Mask" # 首字母大写，例如 "Red Mask"
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+            # 强烈建议：设置一个小一点的默认尺寸，否则8个窗口弹出来会铺满屏幕
+            cv2.resizeWindow(window_name, 320, 240)
 
     last_time = time.time()
     fps = 0.0
+
+    colors_bgr = {
+        'red':    (0, 0, 255),
+        'white':  (255, 255, 255),
+        'black':  (0, 0, 0),
+        'yellow': (0, 255, 255),
+        'green':  (0, 255, 0),
+        'blue':   (255, 0, 0),
+        'pink':   (180, 105, 255), # Hot Pink
+        'brown':  (42, 42, 165)    # Brown
+    }
+
+    def pick_color(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            # param 是我们在 setMouseCallback 中传入的 frame 变量的引用容器
+            # 但由于 frame 在 while 循环中不断刷新，直接读取全局或外部变量比较方便
+            # 这里为了简单，我们假设 'current_hsv' 是一个全局变量或者外部可访问的
+            pixel = hsv[y, x]
+            print(f"点击位置: ({x}, {y})")
+            print(f"HSV值: H={pixel[0]}, S={pixel[1]}, V={pixel[2]}")
+            print(f"建议范围: Lower=[0, 0, {max(0, pixel[2]-40)}], Upper=[180, {min(255, pixel[1]+30)}, 255]")
+            print("-" * 30)
+
+    cv2.setMouseCallback("Ball Tracker", pick_color)
 
     while True:
         ret, frame = cap.read()
@@ -176,27 +231,27 @@ def main() -> None:
             break
 
         blur = cv2.GaussianBlur(frame, (7, 7), 0)
+        global hsv 
         hsv = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV)
 
-        red_mask, white_mask, black_mask = build_masks(hsv)
+        masks = build_masks(hsv)
 
-        red_balls = find_ball_contours(red_mask, args.min_area, args.circularity, check_isolation=True)
-        white_balls = find_ball_contours(white_mask, args.min_area, args.circularity, check_isolation=True)
-        black_balls = find_ball_contours(black_mask, args.min_area, args.circularity, check_isolation=True)
-
-        # Draw all red balls
-        for cnt, circ, area in red_balls:
-            draw_ball(frame, cnt, circ, area, (0, 0, 255), None, text=args.text)
-
-        # Draw one white ball (largest)
-        if white_balls:
-            largest_white = max(white_balls, key=lambda x: x[2])
-            draw_ball(frame, largest_white[0], largest_white[1], largest_white[2], (255, 255, 255), None, text=args.text)
-
-        # Draw one black ball (largest)
-        if black_balls:
-            largest_black = max(black_balls, key=lambda x: x[2])
-            draw_ball(frame, largest_black[0], largest_black[1], largest_black[2], (0, 0, 0), args.text)
+        # 2. 遍历字典，处理每一种颜色的球
+        for color_name, mask in masks.items():
+            
+            # 针对白球开启特殊检查 (Isolation Check)，其他球通常不需要
+            check_iso = (color_name == 'white')
+            
+            # 使用你之前修改好的 find_ball_contours (记得它现在返回三个值!)
+            balls = find_ball_contours(mask, args.min_area, args.circularity, check_isolation=check_iso)
+            
+            # 绘制
+            for cnt, circ, area in balls:
+                # 如果是黑球，中心点画白色；其他球中心点画黑色或默认
+                center_color = (255, 255, 255) if color_name == 'black' else None
+                
+                # 调用你优化过的 draw_ball
+                draw_ball(frame, cnt, circ, area, colors_bgr[color_name], center_color)
 
         now = time.time()
         dt = now - last_time
@@ -207,9 +262,9 @@ def main() -> None:
 
         cv2.imshow("Ball Tracker", frame)
         if args.show_mask:
-            cv2.imshow("Red Mask", red_mask)
-            cv2.imshow("White Mask", white_mask)
-            cv2.imshow("Black Mask", black_mask)
+            for color_name, mask_img in masks.items():
+                window_name = f"{color_name.capitalize()} Mask"
+                cv2.imshow(window_name, mask_img)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q") or key == 27:
