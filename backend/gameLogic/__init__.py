@@ -1,6 +1,7 @@
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from idlelib.autocomplete import TRY_A
 from typing import List, Optional, Tuple
 
 class BallType(Enum):
@@ -114,7 +115,7 @@ class FrameState:
         if justPotRed and self.colourClearance:
             self.activePlayer.target = "COLOUR"
 
-        print(f"TEST CURRENT TARGET: {self.activePlayer.target}")
+        print(f"TEST NEXT TARGET: {self.activePlayer.target}")
 
 
 class RuleEngine:
@@ -217,34 +218,42 @@ class RuleEngine:
                 foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
 
             if (any(b != BallType.RED for b in fs.ctx.potted)) and (fs.activePlayer.target == "RED"):
+                foul = True
                 for b in fs.ctx.potted:
                     foul_points = max(foul_points, BALL_VALUE[b]) # foul is value of highest ball
 
             if (len(ctx.potted) > 1) and (fs.activePlayer.target == "COLOUR"):
+                foul = True
                 for b in fs.ctx.potted:
                     foul_points = max(foul_points, BALL_VALUE[b])
 
             if (any(b != BallType.YELLOW for b in fs.ctx.potted)) and (fs.activePlayer.target == "YELLOW"):
+                foul = True
                 for b in fs.ctx.potted:
                     foul_points = max(foul_points, BALL_VALUE[b])
 
             if (any(b != BallType.GREEN for b in fs.ctx.potted)) and (fs.activePlayer.target == "GREEN"):
+                foul = True
                 for b in fs.ctx.potted:
                     foul_points = max(foul_points, BALL_VALUE[b])
 
             if (any(b != BallType.BROWN for b in fs.ctx.potted)) and (fs.activePlayer.target == "BROWN"):
+                foul = True
                 for b in fs.ctx.potted:
                     foul_points = max(foul_points, BALL_VALUE[b])
 
             if (any(b != BallType.BLUE for b in fs.ctx.potted)) and (fs.activePlayer.target == "BLUE"):
+                foul = True
                 for b in fs.ctx.potted:
                     foul_points = max(foul_points, BALL_VALUE[b])
 
             if (any(b != BallType.PINK for b in fs.ctx.potted)) and (fs.activePlayer.target == "PINK"):
+                foul = True
                 for b in fs.ctx.potted:
                     foul_points = max(foul_points, BALL_VALUE[b])
 
             if (any(b != BallType.BLACK for b in fs.ctx.potted)) and (fs.activePlayer.target == "BLACK"):
+                foul = True
                 for b in fs.ctx.potted:
                     foul_points = max(foul_points, BALL_VALUE[b])
 
@@ -284,7 +293,7 @@ engine = RuleEngine()
 events = [
     Event(time.time(), EventType.SHOT_START),
     Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.RED}),
-    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.RED}),
+    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.BLACK}),
     Event(time.time(), EventType.SHOT_END),
     Event(time.time(), EventType.SHOT_START),
     Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.BLACK}),
