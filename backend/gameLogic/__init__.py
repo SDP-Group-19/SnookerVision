@@ -70,7 +70,7 @@ class Player:
 @dataclass
 class GameState: # PROBABLY JUST GOING TO LEAVE FOR NOW
     games: int = 1 # default 1 for now
-    frames: int = 3 # default 3 for now
+    frames: int = 1 # default 3 for now
     player1: Player = field(default_factory=lambda: Player("Player1"))
     player2: Player = field(default_factory=lambda: Player("Player2"))
     firstTurn: Player = field(init=False) # player who starts first
@@ -86,13 +86,36 @@ class GameState: # PROBABLY JUST GOING TO LEAVE FOR NOW
         )
 
     def end_frame(self): # FOR NOW WERE ONLY PLAYING 1 FRAME AS MVP
-        print("GAME HAS ENDED")
+        print("FRAME HAS ENDED")
         print("Final scores")
         print(f"{self.player1.name} score: {self.player1.score}")
         print(f"{self.player2.name} score: {self.player2.score}")
 
+        if self.player1.score > self.player2.score:
+            self.player1.framesWon += 1
+        else:
+            self.player2.framesWon += 1
+
+        if self.player1.framesWon == self.frames:
+            self.player1.gamesWon += 1
+
+            self.player1.framesWon = 0
+            self.player2.framesWon = 0
+        elif self.player2.framesWon == self.frames:
+            self.player2.gamesWon += 1
+
+            self.player1.framesWon = 0
+            self.player2.framesWon = 0
+
+        if self.player1.gamesWon == self.games:
+            print("Game Over")
+            print(f"{self.player1.name} HAS WON")
+        elif self.player2.gamesWon == self.games:
+            print("Game Over")
+            print(f"{self.player2.name} HAS WON")
+
     def forfeit_frame(self, forfeitPlayer: Player):
-        print("GAME HAS BEEN FORFEIT")
+        print("Frame HAS BEEN FORFEIT")
         print(f"{forfeitPlayer.name} FORFEIT")
         print("Final scores")
         print(f"{self.player1.name} score: {self.player1.score}")
@@ -108,9 +131,7 @@ class FrameState:
     ctx: ShotContext = field(default_factory=ShotContext)
 
     def swap_players(self):
-        temp = self.activePlayer
-        self.activePlayer = self.opponent
-        self.opponent = temp
+        self.activePlayer, self.opponent = self.opponent, self.activePlayer
 
         #reset player target
         if not self.colourClearance:
@@ -299,8 +320,6 @@ class RuleEngine:
             if not justPotRed and fs.activePlayer.target != "COLOUR" and fs.colourClearance:
                 if fs.tempBallOrder:
                     fs.tempBallOrder.pop(0) #must have pot the colour in colour clearance
-                if len(fs.tempBallOrder) == 0:
-                    gs.end_frame()
 
             fs.get_next_target(justPotRed)
 
@@ -357,8 +376,7 @@ events = [
     Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.BLACK}),
     Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.BLACK}),
     Event(time.time(), EventType.SHOT_END),
-    Event(time.time(), EventType.GAME_FORFEITED, {"player": 2}),
-
+    Event(time.time(), EventType.NO_BALLS_REMAINING),
 ]
 
 for e in events:
