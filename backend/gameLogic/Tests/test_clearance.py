@@ -1,5 +1,6 @@
 import unittest
 from backend.gameLogic.game_logic import Event, EventType, BallType
+from utils import *
 
 def pot_colour(colour):
     return [
@@ -15,8 +16,7 @@ def test_colour_clearance_order(engine):
     engine.on_event(Event(None, EventType.NO_REDS_REMAINING))
     fs.activePlayer.target = "YELLOW"
 
-    for e in pot_colour(BallType.YELLOW):
-        engine.on_event(e)
+    run(engine, *pot_colour(BallType.YELLOW))
 
     assert fs.activePlayer.target == "GREEN"
     assert fs.tempBallOrder[0] == "GREEN"

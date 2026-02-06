@@ -1,4 +1,4 @@
-import pytest, unittest
+import pytest
 from backend.gameLogic.game_logic import GameState, RuleEngine
 
 @pytest.fixture

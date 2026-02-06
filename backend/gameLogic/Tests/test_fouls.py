@@ -1,5 +1,6 @@
 import unittest
 from backend.gameLogic.game_logic import Event, EventType, BallType
+from utils import *
 
 def test_foul_wrong_first_contact(engine):
     fs = engine.gameState.current_frame
@@ -11,8 +12,7 @@ def test_foul_wrong_first_contact(engine):
         Event(None, EventType.SHOT_END),
     ]
 
-    for e in events:
-        engine.on_event(e)
+    run(engine, *events)
 
     assert opponent.score == 7  # BLACK foul value
     assert fs.activePlayer == opponent  # turn swapped
