@@ -13,6 +13,24 @@ class BallType(Enum):
     BLACK = auto()
     CUE = auto()
 
+LEGAL_TARGETS = {
+    "RED": {BallType.RED},
+    "COLOUR": {
+        BallType.YELLOW,
+        BallType.GREEN,
+        BallType.BROWN,
+        BallType.BLUE,
+        BallType.PINK,
+        BallType.BLACK,
+    },
+    "YELLOW": {BallType.YELLOW},
+    "GREEN": {BallType.GREEN},
+    "BROWN": {BallType.BROWN},
+    "BLUE": {BallType.BLUE},
+    "PINK": {BallType.PINK},
+    "BLACK": {BallType.BLACK},
+}
+
 BALL_ORDER = [
     "YELLOW",
     "GREEN",
@@ -85,17 +103,17 @@ class FrameState:
         else:
             self.activePlayer.target = self.tempBallOrder[0] #ensure it's not empty
 
-    def get_next_target(self, justPotRed: bool):
+    def get_next_target(self, just_potted_red: bool):
         #NORMAL PLAY
-        if justPotRed and not self.colourClearance:
+        if just_potted_red and not self.colourClearance:
             self.activePlayer.target = "COLOUR"
-        if not justPotRed and not self.colourClearance:
+        if not just_potted_red and not self.colourClearance:
             self.activePlayer.target = "RED"
 
         #COLOUR CLEARANCE
-        if not justPotRed and self.colourClearance and (len(self.tempBallOrder) > 0):
+        if not just_potted_red and self.colourClearance and (len(self.tempBallOrder) > 0):
             self.activePlayer.target = self.tempBallOrder[0] #ensure it's not empty
-        if justPotRed and self.colourClearance:
+        if just_potted_red and self.colourClearance:
             self.activePlayer.target = "COLOUR"
 
         print(f"TEST NEXT TARGET: {self.activePlayer.target}")
@@ -147,19 +165,19 @@ class GameState: # PROBABLY JUST GOING TO LEAVE FOR NOW
             print("Game Over")
             print(f"{self.player2.name} HAS WON")
 
-    def forfeit_frame(self, forfeitPlayer: Player):
+    def forfeit_frame(self, forfeit_player: Player):
         print("Frame HAS BEEN FORFEIT")
-        print(f"{forfeitPlayer.name} FORFEIT")
+        print(f"{forfeit_player.name} FORFEIT")
         print("Final scores")
         print(f"{self.player1.name} score: {self.player1.score}")
         print(f"{self.player2.name} score: {self.player2.score}")
 
-
-
+def foul_value(*balls: BallType) -> int:
+    return max(4, *(BALL_VALUE[b] for b in balls if b in BALL_VALUE))
 
 class RuleEngine:
-    def __init__(self, gameState: GameState) -> None:
-        self.gameState = gameState
+    def __init__(self, game_state: GameState) -> None:
+        self.gameState = game_state
 
     def on_event(self, e: Event) -> List[str]:
         gs = self.gameState
@@ -204,129 +222,71 @@ class RuleEngine:
         return outputs
 
     def _resolve_shot(self) -> List[str]:
-        gs = self.gameState
-        fs = gs.current_frame
+        fs = self.gameState.current_frame
         ctx = fs.ctx
         out: List[str] = []
 
         foul = False
         foul_points = 4
 
-        # MVP foul: cue ball potted
+        target = fs.activePlayer.target
+        legal_targets = LEGAL_TARGETS[target]
+
+        # --- basic fouls ---
         if ctx.cue_potted:
             foul = True
-            foul_points = max(foul_points, 4)
+            foul_points = foul_value(BallType.CUE)
 
-        # MVP foul: no contact detected (you can enable once you have cue ball)
         if ctx.first_contact is None:
             foul = True
-            foul_points = max(foul_points, 4)
         else:
-            if ctx.first_contact[0] != BallType.CUE:
-                foul = True
-                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[0]])
+            cue, first = ctx.first_contact
 
-            if (ctx.first_contact[1] != BallType.RED) and (fs.activePlayer.target == "RED"):
+            if cue != BallType.CUE:
                 foul = True
-                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
+                foul_points = foul_value(cue)
 
-            if (ctx.first_contact[1] == BallType.RED) and (fs.activePlayer.target == "COLOUR"):
+            if first not in legal_targets:
                 foul = True
-                foul_points = max(foul_points, 4)
+                foul_points = foul_value(first)
 
-            if (ctx.first_contact[1] != BallType.YELLOW) and (fs.activePlayer.target == "YELLOW"):
+        # --- potting fouls ---
+        if ctx.potted:
+            if any(b not in legal_targets for b in ctx.potted):
                 foul = True
-                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
+                foul_points = foul_value(*ctx.potted)
 
-            if (ctx.first_contact[1] != BallType.GREEN) and (fs.activePlayer.target == "GREEN"):
+            if target != "RED" and len(ctx.potted) > 1:
                 foul = True
-                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
+                foul_points = foul_value(*ctx.potted)
 
-            if (ctx.first_contact[1] != BallType.BROWN) and (fs.activePlayer.target == "BROWN"):
-                foul = True
-                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
-
-            if (ctx.first_contact[1] != BallType.BLUE) and (fs.activePlayer.target == "BLUE"):
-                foul = True
-                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
-
-            if (ctx.first_contact[1] != BallType.PINK) and (fs.activePlayer.target == "PINK"):
-                foul = True
-                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
-
-            if (ctx.first_contact[1] != BallType.BLACK) and (fs.activePlayer.target == "BLACK"):
-                foul = True
-                foul_points = max(foul_points, BALL_VALUE[ctx.first_contact[1]])
-
-            if (any(b != BallType.RED for b in fs.ctx.potted)) and (fs.activePlayer.target == "RED"):
-                foul = True
-                for b in fs.ctx.potted:
-                    foul_points = max(foul_points, BALL_VALUE[b]) # foul is value of highest ball
-
-            if (len(ctx.potted) > 1) and (fs.activePlayer.target == "COLOUR"):
-                foul = True
-                for b in fs.ctx.potted:
-                    foul_points = max(foul_points, BALL_VALUE[b])
-
-            if (any(b != BallType.YELLOW for b in fs.ctx.potted)) and (fs.activePlayer.target == "YELLOW"):
-                foul = True
-                for b in fs.ctx.potted:
-                    foul_points = max(foul_points, BALL_VALUE[b])
-
-            if (any(b != BallType.GREEN for b in fs.ctx.potted)) and (fs.activePlayer.target == "GREEN"):
-                foul = True
-                for b in fs.ctx.potted:
-                    foul_points = max(foul_points, BALL_VALUE[b])
-
-            if (any(b != BallType.BROWN for b in fs.ctx.potted)) and (fs.activePlayer.target == "BROWN"):
-                foul = True
-                for b in fs.ctx.potted:
-                    foul_points = max(foul_points, BALL_VALUE[b])
-
-            if (any(b != BallType.BLUE for b in fs.ctx.potted)) and (fs.activePlayer.target == "BLUE"):
-                foul = True
-                for b in fs.ctx.potted:
-                    foul_points = max(foul_points, BALL_VALUE[b])
-
-            if (any(b != BallType.PINK for b in fs.ctx.potted)) and (fs.activePlayer.target == "PINK"):
-                foul = True
-                for b in fs.ctx.potted:
-                    foul_points = max(foul_points, BALL_VALUE[b])
-
-            if (any(b != BallType.BLACK for b in fs.ctx.potted)) and (fs.activePlayer.target == "BLACK"):
-                foul = True
-                for b in fs.ctx.potted:
-                    foul_points = max(foul_points, BALL_VALUE[b])
-
+        # --- foul resolution ---
         if foul:
             fs.opponent.score += foul_points
             out.append(f"FOUL +{foul_points} to {fs.opponent.name}")
-
             fs.swap_players()
             return out
 
-        # scoring: sum of potted (simplified)
+        # --- legal scoring ---
         gained = sum(BALL_VALUE[b] for b in ctx.potted)
         fs.activePlayer.score += gained
         out.append(f"LEGAL: {fs.activePlayer.name} +{gained} (score {fs.activePlayer.score})")
 
-        # turn logic (simplified): continue if potted any, else switch
         if gained == 0:
             out.append(f"NO_POT: turn -> {fs.opponent.name}")
             fs.swap_players()
-        else:
-            out.append(f"CONTINUE: {fs.activePlayer.name} keeps turn")
-            #MUST HAVE POT RED IF NO FOULS AND TARGET WAS RED
-            justPotRed = (fs.activePlayer.target == "RED")
+            return out
 
-            if not justPotRed and fs.activePlayer.target != "COLOUR" and fs.colourClearance:
-                if fs.tempBallOrder:
-                    fs.tempBallOrder.pop(0) #must have pot the colour in colour clearance
+        if fs.colourClearance and fs.activePlayer.target != "COLOUR" and fs.tempBallOrder:
+            fs.tempBallOrder.pop(0)
 
-            fs.get_next_target(justPotRed)
+        # --- continue & update target ---
+        just_potted_red = target == "RED"
+
+        fs.get_next_target(just_potted_red)
+        out.append(f"CONTINUE: {fs.activePlayer.name} keeps turn")
 
         return out
-
 
 gs = GameState()
 gs.start_frame()
@@ -345,15 +305,14 @@ events = [
     Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.RED}),
     Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.RED}),
     Event(time.time(), EventType.SHOT_END),
+
     Event(time.time(), EventType.NO_REDS_REMAINING),
+
     Event(time.time(), EventType.SHOT_START),
-    Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.BLACK}),
-    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.BLACK}),
+    Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.YELLOW}),
+    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.YELLOW}),
     Event(time.time(), EventType.SHOT_END),
-    Event(time.time(), EventType.SHOT_START),
-    Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.RED}),
-    Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.RED}),
-    Event(time.time(), EventType.SHOT_END),
+
     Event(time.time(), EventType.SHOT_START),
     Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.YELLOW}),
     Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.YELLOW}),
