@@ -62,7 +62,7 @@ class EventType(Enum):
 
 @dataclass
 class Event:
-    t: float
+    t: float | None
     type: EventType
     data: dict = field(default_factory=dict)
 
