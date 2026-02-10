@@ -1,4 +1,8 @@
 import time
+from threading import Event
+from tkinter import EventType
+
+import paho.mqtt.publish as publish
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import List, Optional, Tuple
@@ -99,6 +103,7 @@ class FrameState:
             self.activePlayer.target = "RED"
         else:
             self.activePlayer.target = self.tempBallOrder[0]
+        print(f"TEST NEXT TARGET: {self.activePlayer.target}")
 
     def get_next_target(self, just_potted_red: bool):
         if just_potted_red and not self.colourClearance:
@@ -165,6 +170,13 @@ class GameState:
 
 def foul_value(*balls: BallType) -> int:
     return max(4, *(BALL_VALUE[b] for b in balls if b in BALL_VALUE))
+
+def buzz_cue():
+    publish.single(
+        "team/vibrate",
+        payload="buzz",
+        hostname="broker.hivemq.com"
+    )
 
 class RuleEngine:
     def __init__(self, game_state: GameState) -> None:
@@ -248,6 +260,7 @@ class RuleEngine:
         if foul:
             fs.opponent.score += foul_points
             out.append(f"FOUL +{foul_points} to {fs.opponent.name}")
+            buzz_cue()
             fs.swap_players()
             return out
 
@@ -280,6 +293,9 @@ if __name__ == "__main__":
         Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.RED}),
         Event(time.time(), EventType.SHOT_END),
         Event(time.time(), EventType.NO_REDS_REMAINING),
+        Event(time.time(), EventType.SHOT_START),
+        Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.BLUE}),
+        Event(time.time(), EventType.SHOT_END),
         Event(time.time(), EventType.SHOT_START),
         Event(time.time(), EventType.FIRST_CONTACT, {"a": BallType.CUE, "b": BallType.YELLOW}),
         Event(time.time(), EventType.BALL_POTTED, {"ball": BallType.YELLOW}),

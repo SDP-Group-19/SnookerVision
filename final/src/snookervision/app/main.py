@@ -10,17 +10,17 @@ from liveconfig import LiveConfig, start_interface
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from snookervision.processing import (
+from final.src.snookervision.processing import (
     get_top_down_view,
     handle_calibration,
     undistort_frame,
     manage_point_selection,
 )
 
-from snookervision.detection import DetectionModel
-from snookervision import config, state, load_camera, parse_args, capture_frame
-from snookervision.state import StateManager
-from snookervision.visualization import GeneratedTableRenderer
+from final.src.snookervision.detection import DetectionModel
+from final.src.snookervision import config, state, load_camera, parse_args, capture_frame
+from final.src.snookervision.state import StateManager
+from final.src.snookervision.visualization import GeneratedTableRenderer
 
 
 

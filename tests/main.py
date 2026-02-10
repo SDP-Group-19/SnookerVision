@@ -1,8 +1,8 @@
 from src.processing import get_top_down_view, handle_calibration, undistort_frame, manage_point_selection
 from src.detection import DetectionModel
 from src import config, state, state_manager, load_camera, parse_args, capture_frame
-from src.game_logic.game_logic import GameState, RuleEngine
-from src.perception.event_detector import EventDetector
+from final.src.snookervision.game_logic.game_logic import GameState, RuleEngine
+from final.src.snookervision.perception.event_detector import EventDetector
 import time
 import numpy as np
 import cv2

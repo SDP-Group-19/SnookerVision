@@ -1,7 +1,7 @@
 import time
 import math
 import logging
-from snookervision.game_logic.game_logic import Event, EventType, BallType
+from final.src.snookervision.game_logic.game_logic import Event, EventType, BallType
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +48,10 @@ class EventDetector:
             events.append(Event(now, EventType.SHOT_END))
             self.shot_active = False
             logger.info("[EVENT] SHOT_END")
-
-        # ---------- NO REDS ----------
-        if "red" in self.prev_balls and not balls.get("red"):
-            events.append(Event(now, EventType.NO_REDS_REMAINING))
-            logger.info("[EVENT] NO_REDS_REMAINING")
+            # ---------- NO REDS ----------
+            if "red" in self.prev_balls and not balls.get("red"):
+                events.append(Event(now, EventType.NO_REDS_REMAINING))
+                logger.info("[EVENT] NO_REDS_REMAINING")
 
         self.prev_balls = self._copy(balls)
         self.last_motion_time = now
