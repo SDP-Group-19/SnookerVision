@@ -1,0 +1,9 @@
+opencv-contrib-python==4.11.0.86
+numpy==1.26.2
+torch==2.6.0
+ultralytics[yolo]==8.3.109
+python-socketio==5.13.0
+requests==2.32.3
+liveconfig==0.2.1b0
+tensorflow-cpu==2.19.0
+keras==3.9.2
