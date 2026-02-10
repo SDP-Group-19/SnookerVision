@@ -1,2 +1,6 @@
 from .detection import DetectionModel
-from .autoencoder import AutoEncoder
+
+try:
+    from .autoencoder import AutoEncoder
+except Exception:  # Optional dependency (tensorflow/keras)
+    AutoEncoder = None

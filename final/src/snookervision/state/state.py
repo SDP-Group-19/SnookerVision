@@ -2,6 +2,13 @@ import time
 import logging
 import math
 import numpy as np
+from snookervision.game_logic.game_logic import (
+    BallType,
+    Event,
+    EventType,
+    GameState,
+    RuleEngine,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +30,19 @@ class StateManager():
         self.overlay_notifications = []
         self.shot_active = False
         self.shot_last_motion_time = None
+        self.shot_stopped_at = None
         self.first_hit_colour = None
         self.second_hit_colour = None
         self.live_overlay_lines = []
+        self.last_potted_text = "-"
+        self.last_foul_text = "-"
+        self.game_state = GameState()
+        self.game_state.start_frame()
+        self.rule_engine = RuleEngine(self.game_state)
+        self.last_shot_active = False
+        self.game_shot_open = False
+        self.first_contact_sent_this_shot = False
+        self.no_reds_announced = False
         self.pocket_names = [
             "top_left",
             "top_middle",
@@ -44,6 +61,7 @@ class StateManager():
             self.config.output_dimensions[0] - (2 * self.config.gantry_effective_range_x_px[0])))
         self.y_ratio = np.divide(self.config.output_dimensions[1], (
             self.config.output_dimensions[1] - (2 * self.config.gantry_effective_range_y_px[0])))
+        self._rebuild_overlay_lines()
 
     def update(self, detections, labels):
         if not self.config or not self.state:
@@ -70,7 +88,9 @@ class StateManager():
         if not detections or not detections[0].boxes:
             self._update_hit_order({}, current_time)
             pot_notifications = self._update_tracks_and_detect_pots(balls, current_time)
+            self._feed_game_logic(balls, pot_notifications, current_time)
             self._notify_pots(pot_notifications)
+            self._rebuild_overlay_lines()
             return
 
         for ball in detections[0].boxes:
@@ -104,7 +124,9 @@ class StateManager():
 
         self._update_hit_order(balls, current_time)
         pot_notifications = self._update_tracks_and_detect_pots(balls, current_time)
+        self._feed_game_logic(balls, pot_notifications, current_time)
         self._notify_pots(pot_notifications)
+        self._rebuild_overlay_lines()
 
         self._update_and_send_balls(balls, corrected_white_ball, current_time)
 
@@ -315,12 +337,106 @@ class StateManager():
 
         if len(pot_notifications) > 1:
             ordered = " -> ".join([n["colour"].upper() for n in pot_notifications])
+            self.last_potted_text = ordered
             self.overlay_notifications.append(
                 {
                     "text": f"Sequence: {ordered}",
                     "ttl": ttl,
                 }
             )
+        else:
+            n = pot_notifications[-1]
+            self.last_potted_text = f"{n['colour'].upper()} ({n['pocket']})"
+
+    def _colour_to_ball_type(self, colour):
+        mapping = {
+            "white": BallType.CUE,
+            "red": BallType.RED,
+            "yellow": BallType.YELLOW,
+            "green": BallType.GREEN,
+            "brown": BallType.BROWN,
+            "blue": BallType.BLUE,
+            "pink": BallType.PINK,
+            "black": BallType.BLACK,
+        }
+        return mapping.get((colour or "").lower())
+
+    def _push_game_outputs(self, outputs):
+        if not outputs:
+            return
+        ttl = max(1, int(self.config.pot_overlay_ttl_frames))
+        for msg in outputs:
+            logger.info(f"[GAME] {msg}")
+            if msg.startswith("FOUL"):
+                self.last_foul_text = msg
+            self.overlay_notifications.append(
+                {"text": f"Game: {msg}", "ttl": ttl}
+            )
+
+    def _feed_game_logic(self, balls, pot_notifications, now):
+        # Shot lifecycle for rules: keep shot open until pot confirmation window has passed.
+        shot_end_grace = max(0.2, float(getattr(self.config, "pot_missing_seconds", 2.0)))
+
+        if self.shot_active and not self.game_shot_open:
+            outputs = self.rule_engine.on_event(Event(now, EventType.SHOT_START))
+            self._push_game_outputs(outputs)
+            self.game_shot_open = True
+            self.first_contact_sent_this_shot = False
+
+        can_end_shot = (
+            self.game_shot_open
+            and (not self.shot_active)
+            and self.shot_stopped_at is not None
+            and (now - self.shot_stopped_at) >= shot_end_grace
+            and (not self._has_pending_pot_confirmations(now))
+        )
+        if can_end_shot:
+            outputs = self.rule_engine.on_event(Event(now, EventType.SHOT_END))
+            self._push_game_outputs(outputs)
+            self.game_shot_open = False
+            self.first_contact_sent_this_shot = False
+
+        # First contact: cue -> first non-white hit colour.
+        if self.game_shot_open and self.shot_active and not self.first_contact_sent_this_shot:
+            hit_colour = None
+            if self.first_hit_colour and self.first_hit_colour.lower() != "white":
+                hit_colour = self.first_hit_colour
+            elif self.second_hit_colour:
+                hit_colour = self.second_hit_colour
+
+            hit_ball = self._colour_to_ball_type(hit_colour)
+            if hit_ball is not None and hit_ball != BallType.CUE:
+                outputs = self.rule_engine.on_event(
+                    Event(
+                        now,
+                        EventType.FIRST_CONTACT,
+                        {"a": BallType.CUE, "b": hit_ball},
+                    )
+                )
+                self._push_game_outputs(outputs)
+                self.first_contact_sent_this_shot = True
+
+        # Pot events from already-confirmed live pot notifications (frame delta only).
+        if self.game_shot_open:
+            for n in pot_notifications:
+                ball = self._colour_to_ball_type(n.get("colour"))
+                if ball is None:
+                    continue
+                outputs = self.rule_engine.on_event(
+                    Event(now, EventType.BALL_POTTED, {"ball": ball})
+                )
+                self._push_game_outputs(outputs)
+
+        # Optional phase event when all reds gone.
+        red_count = len(balls.get("red", []))
+        if red_count == 0 and not self.no_reds_announced and not self.shot_active:
+            outputs = self.rule_engine.on_event(Event(now, EventType.NO_REDS_REMAINING))
+            self._push_game_outputs(outputs)
+            self.no_reds_announced = True
+        elif red_count > 0:
+            self.no_reds_announced = False
+
+        self.last_shot_active = self.shot_active
 
     def _colour_is_moving(self, colour, balls, threshold):
         if not self.previous_state:
@@ -356,6 +472,7 @@ class StateManager():
         if not self.shot_active and any_moving:
             self.shot_active = True
             self.shot_last_motion_time = now
+            self.shot_stopped_at = None
             self.first_hit_colour = None
             self.second_hit_colour = None
 
@@ -372,14 +489,44 @@ class StateManager():
 
             if self.shot_last_motion_time is not None and (now - self.shot_last_motion_time) >= reset_seconds:
                 self.shot_active = False
+                self.shot_stopped_at = now
                 self.shot_last_motion_time = None
 
-        self.live_overlay_lines = []
-        if self.shot_active or self.first_hit_colour is not None or self.second_hit_colour is not None:
-            first_txt = self.first_hit_colour.upper() if self.first_hit_colour else "-"
-            second_txt = self.second_hit_colour.upper() if self.second_hit_colour else "-"
-            self.live_overlay_lines.append(f"First hit: {first_txt}")
-            self.live_overlay_lines.append(f"Second hit: {second_txt}")
+    def _has_pending_pot_confirmations(self, now):
+        missing_seconds = max(0.2, float(self.config.pot_missing_seconds))
+        for track in self.ball_tracks.values():
+            if track.get("potted"):
+                continue
+            if track.get("missing_since") is None:
+                continue
+            if track.get("pocket_idx") is None:
+                continue
+            if (now - track["missing_since"]) < missing_seconds:
+                return True
+        return False
+
+    def _rebuild_overlay_lines(self):
+        first_txt = self.first_hit_colour.upper() if self.first_hit_colour else "-"
+        second_txt = self.second_hit_colour.upper() if self.second_hit_colour else "-"
+        player1 = self.game_state.player1
+        player2 = self.game_state.player2
+        frame = self.game_state.current_frame
+        turn_name = frame.activePlayer.name if frame is not None else "-"
+        target_name = frame.activePlayer.target if frame is not None else "-"
+
+        self.live_overlay_lines = [
+            "[SHOT]",
+            f"First hit: {first_txt}",
+            f"Second hit: {second_txt}",
+            f"Ball potted: {self.last_potted_text}",
+            "[FOUL]",
+            f"Last foul: {self.last_foul_text}",
+            "[POINTS]",
+            f"{player1.name}: {player1.score}",
+            f"{player2.name}: {player2.score}",
+            f"Turn: {turn_name}",
+            f"Target: {target_name}",
+        ]
 
     def _advance_overlay_notifications(self):
         updated = []
@@ -389,10 +536,13 @@ class StateManager():
                 updated.append({"text": item["text"], "ttl": remaining})
         self.overlay_notifications = updated
 
-    def get_overlay_lines(self, max_lines=4):
+    def get_overlay_lines(self, max_lines=14):
         lines = [item["text"] for item in self.overlay_notifications]
-        combined = self.live_overlay_lines + lines
-        return combined[-max_lines:]
+        if len(self.live_overlay_lines) >= max_lines:
+            return self.live_overlay_lines[:max_lines]
+
+        remaining = max_lines - len(self.live_overlay_lines)
+        return self.live_overlay_lines + lines[-remaining:]
 
     def _coords_clamped(self, x, y):
         x = max(0, min(x, self.config.output_dimensions[0]))
