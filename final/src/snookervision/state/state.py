@@ -17,9 +17,15 @@ class StateManager():
         self.ball_tracks = {}
         self.next_track_id = 1
         self.pot_notifications = []
+        self.recent_non_red_pots = []
         self.pot_counter = 0
         self.tracking_tick = 0
         self.overlay_notifications = []
+        self.shot_active = False
+        self.shot_last_motion_time = None
+        self.first_hit_colour = None
+        self.second_hit_colour = None
+        self.live_overlay_lines = []
         self.pocket_names = [
             "top_left",
             "top_middle",
@@ -62,6 +68,7 @@ class StateManager():
         self.not_moved_counter = 0
 
         if not detections or not detections[0].boxes:
+            self._update_hit_order({}, current_time)
             pot_notifications = self._update_tracks_and_detect_pots(balls, current_time)
             self._notify_pots(pot_notifications)
             return
@@ -95,6 +102,7 @@ class StateManager():
         if self.not_moved_counter == num_balls:
             self.previous_state = balls
 
+        self._update_hit_order(balls, current_time)
         pot_notifications = self._update_tracks_and_detect_pots(balls, current_time)
         self._notify_pots(pot_notifications)
 
@@ -190,7 +198,9 @@ class StateManager():
         pocket_threshold = max(10, int(self.config.pot_pocket_radius_px))
         missing_seconds = max(0.2, float(self.config.pot_missing_seconds))
         stale_seconds = max(missing_seconds + 0.5, float(self.config.pot_track_stale_seconds))
-
+        non_red_cooldown = max(
+            0.2, float(getattr(self.config, "non_red_pot_cooldown_seconds", 3.0))
+        )
         colours = set(
             [c for c in balls.keys() if c not in {"arm", "hole"}]
             + [t["colour"] for t in self.ball_tracks.values() if not t["potted"]]
@@ -241,14 +251,29 @@ class StateManager():
             if track["missing_since"] is not None and track["pocket_idx"] is not None:
                 missing_duration = now - track["missing_since"]
                 if missing_duration >= missing_seconds:
-                    self.pot_counter += 1
-                    events.append({
-                        "order": self.pot_counter,
-                        "track_id": track["id"],
-                        "colour": track["colour"],
-                        "pocket": self.pocket_names[track["pocket_idx"]],
-                        "missing_seconds": missing_duration,
-                    })
+                    pocket_name = self.pocket_names[track["pocket_idx"]]
+                    allow_emit = True
+                    for recent in self.recent_non_red_pots:
+                        if recent["colour"] != track["colour"]:
+                            continue
+                        if recent["pocket"] != pocket_name:
+                            continue
+                        if now - recent["time"] <= non_red_cooldown:
+                            allow_emit = False
+                            break
+
+                    if allow_emit:
+                        self.pot_counter += 1
+                        events.append({
+                            "order": self.pot_counter,
+                            "track_id": track["id"],
+                            "colour": track["colour"],
+                            "pocket": pocket_name,
+                            "missing_seconds": missing_duration,
+                        })
+                        self.recent_non_red_pots.append(
+                            {"colour": track["colour"], "pocket": pocket_name, "time": now}
+                        )
                     track["potted"] = True
                     track["potted_at"] = now
                     continue
@@ -259,6 +284,10 @@ class StateManager():
         for track_id in stale_track_ids:
             self.ball_tracks.pop(track_id, None)
 
+        self.recent_non_red_pots = [
+            p for p in self.recent_non_red_pots if now - p["time"] <= non_red_cooldown
+        ]
+
         events.sort(key=lambda e: e["order"])
         return events
 
@@ -266,20 +295,14 @@ class StateManager():
         if not pot_notifications:
             return
 
+        self.pot_notifications.extend(pot_notifications)
+        ttl = max(1, int(self.config.pot_overlay_ttl_frames))
         for n in pot_notifications:
             logger.info(
                 f"[POT] #{n['order']} {n['colour'].upper()} "
                 f"(track {n['track_id']}) potted at {n['pocket']} "
                 f"after missing {n['missing_seconds']:.2f}s"
             )
-
-        if len(pot_notifications) > 1:
-            ordered = " -> ".join([n["colour"] for n in pot_notifications])
-            logger.info(f"[POT] Sequence: {ordered}")
-
-        self.pot_notifications.extend(pot_notifications)
-        ttl = max(1, int(self.config.pot_overlay_ttl_frames))
-        for n in pot_notifications:
             self.overlay_notifications.append(
                 {
                     "text": (
@@ -289,6 +312,7 @@ class StateManager():
                     "ttl": ttl,
                 }
             )
+
         if len(pot_notifications) > 1:
             ordered = " -> ".join([n["colour"].upper() for n in pot_notifications])
             self.overlay_notifications.append(
@@ -297,6 +321,65 @@ class StateManager():
                     "ttl": ttl,
                 }
             )
+
+    def _colour_is_moving(self, colour, balls, threshold):
+        if not self.previous_state:
+            return False
+        curr_positions = balls.get(colour, [])
+        prev_positions = self.previous_state.get(colour, [])
+        if not curr_positions or not prev_positions:
+            return False
+
+        for curr in curr_positions:
+            nearest = min(
+                math.hypot(curr["x"] - prev["x"], curr["y"] - prev["y"])
+                for prev in prev_positions
+            )
+            if nearest > threshold:
+                return True
+        return False
+
+    def _update_hit_order(self, balls, now):
+        move_threshold = max(2, int(getattr(self.config, "hit_motion_threshold_px", 10)))
+        reset_seconds = max(0.2, float(getattr(self.config, "hit_stationary_reset_seconds", 1.0)))
+
+        moving_colours = []
+        for colour in balls.keys():
+            if colour in {"arm", "hole"}:
+                continue
+            if self._colour_is_moving(colour, balls, move_threshold):
+                moving_colours.append(colour)
+
+        white_moving = "white" in moving_colours
+        any_moving = len(moving_colours) > 0
+
+        if not self.shot_active and any_moving:
+            self.shot_active = True
+            self.shot_last_motion_time = now
+            self.first_hit_colour = None
+            self.second_hit_colour = None
+
+        if self.shot_active:
+            if any_moving:
+                self.shot_last_motion_time = now
+
+            for colour in moving_colours:
+                if self.first_hit_colour is None:
+                    self.first_hit_colour = colour
+                    continue
+                if self.second_hit_colour is None and colour != self.first_hit_colour:
+                    self.second_hit_colour = colour
+
+            if self.shot_last_motion_time is not None and (now - self.shot_last_motion_time) >= reset_seconds:
+                self.shot_active = False
+                self.shot_last_motion_time = None
+
+        self.live_overlay_lines = []
+        if self.shot_active or self.first_hit_colour is not None or self.second_hit_colour is not None:
+            first_txt = self.first_hit_colour.upper() if self.first_hit_colour else "-"
+            second_txt = self.second_hit_colour.upper() if self.second_hit_colour else "-"
+            self.live_overlay_lines.append(f"First hit: {first_txt}")
+            self.live_overlay_lines.append(f"Second hit: {second_txt}")
 
     def _advance_overlay_notifications(self):
         updated = []
@@ -308,7 +391,8 @@ class StateManager():
 
     def get_overlay_lines(self, max_lines=4):
         lines = [item["text"] for item in self.overlay_notifications]
-        return lines[-max_lines:]
+        combined = self.live_overlay_lines + lines
+        return combined[-max_lines:]
 
     def _coords_clamped(self, x, y):
         x = max(0, min(x, self.config.output_dimensions[0]))

@@ -37,7 +37,7 @@ class Config:
         self.use_hidden_balls = False
         self.use_model = True
         self.process_every_n_frames = 2
-        self.detection_model_path = "final/src/snookervision/data/model/best_color.pt"  
+        self.detection_model_path = "final/src/snookervision/data/model/best_color.pt"
         self.position_threshold = 6
         self.hole_threshold = 30
         self.conf_threshold = 0.75
@@ -50,6 +50,9 @@ class Config:
         self.pot_track_stale_seconds = 6.0
         self.pot_tracking_match_px = 22
         self.pot_pocket_radius_px = 85
+        self.non_red_pot_cooldown_seconds = 3.0
+        self.hit_motion_threshold_px = 10
+        self.hit_stationary_reset_seconds = 1.0
         self.pot_overlay_ttl_frames = 60
         self.hide_windows = False
         self.use_calibration = False  # Disabled - causes zoom issues
