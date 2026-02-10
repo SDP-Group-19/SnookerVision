@@ -1,0 +1,43 @@
+{
+    "live_instances": {
+        "config": {
+            "camera_port": "0",
+            "font_color": "(255, 255, 255)",
+            "font_scale": "0.5",
+            "font_thickness": "1",
+            "bbox_colors": "[(255, 0, 0), (0, 0, 0), (0, 165, 255), (0, 0, 255), (255, 255, 255), (0, 255, 255)]",
+            "use_obstruction_detection": "False",
+            "autoencoder_model_path": "./tests/src/data/model/autoencoder_model.keras",
+            "collect_ae_data": "False",
+            "ae_data_path": "./tests/src/data/model/ae_data/",
+            "obstruction_threshold": "0.013",
+            "obstruction_warn_if_within": "0.05",
+            "obstruction_buffer_size": "4",
+            "use_networking": "False",
+            "network_update_interval": "0.1",
+            "poolpal_url": "http://poolpal.joshn.uk",
+            "output_dimensions": "(1200, 600)",
+            "ball_area_range": "(1500, 4500)",
+            "arm_area_range": "(10000, 20000)",
+            "gantry_effective_range_x_px": "(100, 1100)",
+            "gantry_effective_range_y_px": "(84, 516)",
+            "use_hidden_balls": "False",
+            "use_model": "True",
+            "process_every_n_frames": "2",
+            "detection_model_path": "./tests/model/best.pt",
+            "position_threshold": "6",
+            "hole_threshold": "30",
+            "conf_threshold": "0.5",
+            "draw_results": "True",
+            "hide_windows": "False",
+            "use_calibration": "False",
+            "use_table_pts": "False",
+            "model_image_path": "./tests/src/data/model/training_images/",
+            "collect_model_images": "False",
+            "calibration_params_path": "./tests/src/data/calibration_params.json",
+            "calibration_images_path": "./tests/src/data/calibration_images/",
+            "table_pts_path": "./tests/src/data/table_pts.json"
+        }
+    },
+    "live_variables": {}
+}
