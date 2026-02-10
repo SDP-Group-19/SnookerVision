@@ -6,6 +6,7 @@ import logging
 import cv2
 import time
 import os
+import platform
 from random import randint
 
 config = liveinstance("config")(Config())
@@ -53,6 +54,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--interface-port",
+        type=int,
+        default=5000,
+        help="Port for the web interface (default: 5000)."
+    )
+
+    parser.add_argument(
         "--camera-port",
         type=int,
         default=config.camera_port,
@@ -73,18 +81,39 @@ def parse_args():
         default=False
     )
 
+    parser.add_argument(
+        "--select-table-pts",
+        action="store_true",
+        help="Force selecting table points again and overwrite saved points.",
+        default=False
+    )
+
     return parser.parse_args()
 
 
 def load_camera():
     """
     This function loads the camera from the camera port specified in the config.
-    It uses the MSMF backend to allow the camera to run at it's native resolution.
     """
     try:
         logger.info("Starting camera...")
-        camera = cv2.VideoCapture(
-            config.camera_port, apiPreference=cv2.CAP_MSMF)
+        system = platform.system()
+        if system == "Darwin":
+            backend = cv2.CAP_AVFOUNDATION
+        elif system == "Windows":
+            backend = cv2.CAP_MSMF
+        elif hasattr(cv2, "CAP_V4L2"):
+            backend = cv2.CAP_V4L2
+        else:
+            backend = cv2.CAP_ANY
+
+        camera = cv2.VideoCapture(config.camera_port, apiPreference=backend)
+        if not camera.isOpened():
+            logger.error(
+                f"Could not open camera index {config.camera_port} with backend {backend}."
+            )
+            return None
+
         camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
         camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
         camera.set(cv2.CAP_PROP_FPS, 30)

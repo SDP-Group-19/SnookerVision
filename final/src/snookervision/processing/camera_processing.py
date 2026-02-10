@@ -164,8 +164,8 @@ def save_table_pts(table_pts):
         logger.error(f"Error saving table points: {e}")
 
 
-def manage_point_selection(frame):
-    sorted_pts = load_table_pts()
+def manage_point_selection(frame, force_reselect=False):
+    sorted_pts = None if force_reselect else load_table_pts()
     if sorted_pts is None:
         table_pts = []
 
@@ -221,7 +221,7 @@ def manage_point_selection(frame):
 
             if (key == ord('\n') or key == ord('\r')) and len(table_pts) == 4:
                 break
-            if key == ord('\b') and len(table_pts) > 0:
+            if key in (8, 127) and len(table_pts) > 0:
                 logger.info(f"Point {table_pts[-1]} removed.")
                 table_pts.pop()
             if key == ord('q'):
@@ -241,6 +241,5 @@ def sort_points(table_pts):
     top_pts = sorted(table_pts[:2], key=lambda x : x[0])
     bottom_pts = sorted(table_pts[2:], key=lambda x : x[0])
     return [top_pts[0], top_pts[1], bottom_pts[0], bottom_pts[1]]
-
 
 

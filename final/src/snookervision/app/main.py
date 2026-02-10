@@ -1,8 +1,15 @@
+import sys
+from pathlib import Path
 import time
 import numpy as np
 import cv2
 import logging
 from liveconfig import LiveConfig, start_interface
+
+# Allow running this file directly: `python final/src/snookervision/app/main.py`
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 from snookervision.processing import (
     get_top_down_view,
     handle_calibration,
@@ -12,9 +19,8 @@ from snookervision.processing import (
 
 from snookervision.detection import DetectionModel
 from snookervision import config, state, load_camera, parse_args, capture_frame
-from snookervision.game_logic.game_logic import GameState, RuleEngine
-from snookervision.perception.event_detector import EventDetector
 from snookervision.state import StateManager
+from snookervision.visualization import GeneratedTableRenderer
 
 
 
@@ -38,7 +44,7 @@ def main():
     args = parse_args()
     config.camera_port = args.camera_port
     if not args.no_interface:
-        start_interface("web")
+        start_interface("web", port=args.interface_port)
 
     if args.file is not None:
         camera = cv2.VideoCapture(args.file)
@@ -48,6 +54,11 @@ def main():
             return
     else:
         camera = load_camera()
+        if camera is None:
+            logger.error(
+                "Camera initialization failed. Try --camera-port 1 (or 2) and --no-interface."
+            )
+            return
         ret, frame = camera.read()
         if not ret:
             logger.error("Failed to read from camera.")
@@ -63,11 +74,15 @@ def main():
     
     # Handle table point selection if not disabled
     if not args.no_table_pts:
-        table_pts = manage_point_selection(processed_frame)
+        table_pts = manage_point_selection(
+            processed_frame,
+            force_reselect=args.select_table_pts,
+        )
         if table_pts is None:
             logger.error("Table points not selected. Continuing without.")
             config.use_table_pts = False
         else:
+            config.use_table_pts = True
             table_rect = np.float32([
                 [0, 0],
                 [config.output_dimensions[0], 0],
@@ -83,15 +98,10 @@ def main():
     detection_model = DetectionModel()
     if detection_model.model is None:
         return
+    table_renderer = GeneratedTableRenderer(config.generated_table_size)
 
-    # Game logic and event detector integration
-    game_state = GameState()
-    game_state.start_frame()
-    rule_engine = RuleEngine(game_state)
-    event_detector = EventDetector()
     state_manager = StateManager()
     state_manager.initialize(config, state)
-    state_manager.set_game_logic(rule_engine, event_detector)
 
     # Create resizable window for fullscreen capability
     cv2.namedWindow("Detection", cv2.WINDOW_NORMAL)
@@ -120,10 +130,37 @@ def main():
             processed_frame = get_top_down_view(
                 processed_frame, homography_matrix)
         if config.collect_model_images or config.collect_ae_data:
-            capture_frame(processed_frame)
+            capture_frame(None, processed_frame)
 
-        detections, labels = detection_model.handle_detection(processed_frame, fps)
+        overlay_lines = state_manager.get_overlay_lines()
+        detections, labels = detection_model.handle_detection(
+            processed_frame,
+            fps,
+            overlay_lines=overlay_lines,
+        )
         state_manager.update(detections, labels)
+
+        if config.show_generated_table and not config.hide_windows:
+            markers = detection_model.get_ball_markers(processed_frame, detections)
+            generated_table = table_renderer.render(processed_frame.shape, markers)
+            for idx, text in enumerate(overlay_lines):
+                y = 22 + (idx * 18)
+                cv2.putText(
+                    generated_table,
+                    text,
+                    (10, y),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (255, 255, 255),
+                    1,
+                )
+            cv2.imshow(config.generated_table_window_name, generated_table)
+        else:
+            try:
+                if cv2.getWindowProperty(config.generated_table_window_name, cv2.WND_PROP_VISIBLE) >= 0:
+                    cv2.destroyWindow(config.generated_table_window_name)
+            except cv2.error:
+                pass
 
         if state.autoencoder is not None \
                 and config.use_obstruction_detection \

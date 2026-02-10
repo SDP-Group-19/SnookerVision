@@ -25,6 +25,7 @@ keras==3.9.2
 kiwisolver==1.4.9
 libclang==18.1.1
 liveconfig==0.2.1b0
+<<<<<<< Updated upstream
 Markdown==3.10.1
 markdown-it-py==4.0.0
 MarkupSafe==3.0.3
@@ -77,3 +78,9 @@ Werkzeug==3.1.5
 wheel==0.46.3
 wrapt==2.1.1
 wsproto==1.3.2
+=======
+# tensorflow-cpu has no macOS arm64 wheel; use tensorflow on macOS.
+tensorflow-cpu==2.19.0; platform_system != "Darwin"
+tensorflow==2.19.0; platform_system == "Darwin"
+keras==3.9.2
+>>>>>>> Stashed changes

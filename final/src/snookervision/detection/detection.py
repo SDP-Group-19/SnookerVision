@@ -28,6 +28,9 @@ class DetectionModel:
         self.frame_count = 0
         self.found_holes = []
         self.last_result = None
+        self.ball_class_names = {
+            "white", "black", "red", "yellow", "green", "brown", "blue", "pink"
+        }
 
     def load_model(self):
         if not os.path.exists(config.detection_model_path):
@@ -175,7 +178,42 @@ class DetectionModel:
 
         return classname, color, xyxy[0], xyxy[1], xyxy[2], xyxy[3]
 
-    def draw(self, frame, filtered_results, fps=0):
+    def _sample_ball_color(self, frame, center_x, center_y, radius):
+        mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+        cv2.circle(mask, (center_x, center_y), radius, 255, -1)
+        mean_bgr = cv2.mean(frame, mask=mask)[:3]
+        return tuple(int(c) for c in mean_bgr)
+
+    def get_ball_markers(self, frame, filtered_results):
+        markers = []
+        if not filtered_results or filtered_results[0].boxes is None:
+            return markers
+
+        frame_height, frame_width = frame.shape[:2]
+
+        for result in filtered_results[0].boxes:
+            classname, _, xmin, ymin, xmax, ymax = self._get_result_info(result)
+            if classname not in self.ball_class_names:
+                continue
+
+            center_x = int((xmin + xmax) / 2)
+            center_y = int((ymin + ymax) / 2)
+            center_x = int(np.clip(center_x, 0, frame_width - 1))
+            center_y = int(np.clip(center_y, 0, frame_height - 1))
+
+            radius = max(2, min((xmax - xmin), (ymax - ymin)) // 4)
+            color = self._sample_ball_color(frame, center_x, center_y, radius)
+            markers.append(
+                {
+                    "label": classname,
+                    "center": (center_x, center_y),
+                    "color": color,
+                }
+            )
+
+        return markers
+
+    def draw(self, frame, filtered_results, fps=0, overlay_lines=None):
         frame_height, frame_width = frame.shape[:2]
         
         # Draw FPS in top right corner (small text)
@@ -184,6 +222,7 @@ class DetectionModel:
                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
         
         if not filtered_results or filtered_results[0].boxes is None:
+            self._draw_notifications(frame, overlay_lines)
             return
 
         boxes = filtered_results[0].boxes
@@ -266,8 +305,36 @@ class DetectionModel:
                            (box_x + 5, box_y + 32 + i * 18), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.38, (255, 255, 255), 1)
 
+        self._draw_notifications(frame, overlay_lines)
+
         cv2.namedWindow("Detection", cv2.WINDOW_NORMAL)
         cv2.imshow("Detection", frame)
+
+    def _draw_notifications(self, frame, overlay_lines):
+        if not overlay_lines:
+            return
+        padding = 8
+        line_h = 20
+        box_width = 420
+        box_height = padding * 2 + len(overlay_lines) * line_h
+        x0, y0 = 10, 10
+
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (x0, y0), (x0 + box_width, y0 + box_height), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
+        cv2.rectangle(frame, (x0, y0), (x0 + box_width, y0 + box_height), (255, 255, 255), 1)
+
+        for i, text in enumerate(overlay_lines):
+            y = y0 + padding + 14 + i * line_h
+            cv2.putText(
+                frame,
+                text,
+                (x0 + padding, y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 255),
+                1,
+            )
 
     def extract_bounding_boxes(self, frame, results):
         bounding_boxes = []
@@ -284,7 +351,7 @@ class DetectionModel:
 
         return cv2.inpaint(frame, mask, 3, cv2.INPAINT_TELEA)
 
-    def handle_detection(self, frame, fps=0):
+    def handle_detection(self, frame, fps=0, overlay_lines=None):
         detections = None
         labels = None
         if not config.use_model:
@@ -296,7 +363,7 @@ class DetectionModel:
             if config.draw_results and not config.hide_windows:
                 self.destroy_camera_frame_window()
                 drawing_frame = frame.copy()
-                self.draw(drawing_frame, detections, fps)
+                self.draw(drawing_frame, detections, fps, overlay_lines=overlay_lines)
                 cv2.imshow("Detection", drawing_frame)
             elif not config.hide_windows:
                 self.destroy_detection_drawing_window()
