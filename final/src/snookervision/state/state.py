@@ -43,6 +43,8 @@ class StateManager():
         self.game_shot_open = False
         self.first_contact_sent_this_shot = False
         self.no_reds_announced = False
+        self.red_potted_ever = False
+        self.zero_red_since = None
         self.pocket_names = [
             "top_left",
             "top_middle",
@@ -374,6 +376,9 @@ class StateManager():
             )
 
     def _feed_game_logic(self, balls, pot_notifications, now):
+        if any((n.get("colour") or "").lower() == "red" for n in pot_notifications):
+            self.red_potted_ever = True
+
         # Shot lifecycle for rules: keep shot open until pot confirmation window has passed.
         shot_end_grace = max(0.2, float(getattr(self.config, "pot_missing_seconds", 2.0)))
 
@@ -428,13 +433,21 @@ class StateManager():
                 self._push_game_outputs(outputs)
 
         # Optional phase event when all reds gone.
+        no_reds_confirm_seconds = max(
+            0.2, float(getattr(self.config, "no_reds_confirm_seconds", 1.0))
+        )
         red_count = len(balls.get("red", []))
-        if red_count == 0 and not self.no_reds_announced and not self.shot_active:
-            outputs = self.rule_engine.on_event(Event(now, EventType.NO_REDS_REMAINING))
-            self._push_game_outputs(outputs)
-            self.no_reds_announced = True
-        elif red_count > 0:
+        if red_count > 0:
             self.no_reds_announced = False
+            self.zero_red_since = None
+        elif not self.shot_active and self.red_potted_ever:
+            if self.zero_red_since is None:
+                self.zero_red_since = now
+            stable_zero_reds = (now - self.zero_red_since) >= no_reds_confirm_seconds
+            if stable_zero_reds and not self.no_reds_announced:
+                outputs = self.rule_engine.on_event(Event(now, EventType.NO_REDS_REMAINING))
+                self._push_game_outputs(outputs)
+                self.no_reds_announced = True
 
         self.last_shot_active = self.shot_active
 

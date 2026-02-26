@@ -1,6 +1,6 @@
 from liveconfig import liveinstance, trigger
-from final.src.snookervision.state import StateManager
-from final.src.snookervision.config import Config
+from snookervision.state import StateManager
+from snookervision.config import Config
 import argparse
 import logging
 import cv2
@@ -23,12 +23,12 @@ class State:
 state = State()
 
 if config.use_obstruction_detection:
-    from final.src.snookervision.detection import AutoEncoder
+    from snookervision.detection import AutoEncoder
     state.autoencoder = AutoEncoder()
 
 # Initialize networking if needed
 if config.use_networking:
-    from final.src.snookervision.networking import Network
+    from snookervision.networking import Network
     state.network = Network()
     state.network.connect()
 
@@ -153,7 +153,7 @@ def _capture_and_save(path, frame):
 @trigger
 def start_network():
     if config.use_networking and state.network is None:
-        from final.src.snookervision.networking import Network
+        from snookervision.networking import Network
         logger.info("Starting network...")
         state.network = Network()
         state.network.connect()

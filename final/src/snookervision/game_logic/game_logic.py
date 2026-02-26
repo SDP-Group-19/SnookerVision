@@ -1,6 +1,5 @@
 import time
 from threading import Event
-from tkinter import EventType
 
 import paho.mqtt.publish as publish
 from dataclasses import dataclass, field
