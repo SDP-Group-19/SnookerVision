@@ -74,9 +74,14 @@ def main():
     
     # Handle table point selection if not disabled
     if not args.no_table_pts:
+        force_reselect = args.select_table_pts or args.file is not None
+        if args.file is not None and not args.select_table_pts:
+            logger.info(
+                "Video file input detected; please select 4 table corners for this clip."
+            )
         table_pts = manage_point_selection(
             processed_frame,
-            force_reselect=args.select_table_pts,
+            force_reselect=force_reselect,
         )
         if table_pts is None:
             logger.error("Table points not selected. Continuing without.")

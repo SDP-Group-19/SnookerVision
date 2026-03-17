@@ -519,8 +519,6 @@ class StateManager():
         return False
 
     def _rebuild_overlay_lines(self):
-        first_txt = self.first_hit_colour.upper() if self.first_hit_colour else "-"
-        second_txt = self.second_hit_colour.upper() if self.second_hit_colour else "-"
         player1 = self.game_state.player1
         player2 = self.game_state.player2
         frame = self.game_state.current_frame
@@ -529,8 +527,6 @@ class StateManager():
 
         self.live_overlay_lines = [
             "[SHOT]",
-            f"First hit: {first_txt}",
-            f"Second hit: {second_txt}",
             f"Ball potted: {self.last_potted_text}",
             "[FOUL]",
             f"Last foul: {self.last_foul_text}",
