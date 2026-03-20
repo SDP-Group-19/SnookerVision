@@ -156,6 +156,42 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--detector-device",
+        type=str,
+        default=config.detector_device,
+        choices=("auto", "cpu", "cuda", "mps"),
+        help="Inference device selection."
+    )
+
+    parser.add_argument(
+        "--hide-windows",
+        action="store_true",
+        default=config.hide_windows,
+        help="Do not open OpenCV display windows."
+    )
+
+    parser.add_argument(
+        "--no-draw-results",
+        action="store_true",
+        default=False,
+        help="Run detection without drawing boxes or overlays."
+    )
+
+    parser.add_argument(
+        "--show-generated-table",
+        action="store_true",
+        default=config.show_generated_table,
+        help="Show the generated table view."
+    )
+
+    parser.add_argument(
+        "--use-calibration",
+        action="store_true",
+        default=config.use_calibration,
+        help="Enable camera undistortion using saved calibration parameters."
+    )
+
+    parser.add_argument(
         "--no-calibration",
         action="store_true",
         help="Skip camera calibration/undistortion.",

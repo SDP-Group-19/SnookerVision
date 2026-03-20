@@ -48,6 +48,7 @@ python3 final/src/snookervision/app/main.py \
   --camera-height 720 \
   --process-every-n-frames 1 \
   --detector-imgsz 640 \
+  --detector-device auto \
   --no-calibration
 ```
 
@@ -55,8 +56,9 @@ If throughput is still too low, try these in order:
 
 - Lower Raspberry Pi stream resolution to `960x540` or `640x480`
 - Lower `--detector-imgsz` from `640` to `512`
-- Disable extra windows if you do not need them by setting `hide_windows`
+- Run with `--hide-windows --no-draw-results` if you do not need live overlays
 - Increase `--process-every-n-frames` to `2` or `3` to trade temporal precision for FPS
+- If you are on Apple Silicon or NVIDIA, the app now prefers `MPS/CUDA` automatically when available
 
 ## Notes
 

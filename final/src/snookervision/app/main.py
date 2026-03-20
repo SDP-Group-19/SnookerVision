@@ -49,6 +49,11 @@ def main():
     config.camera_fps = args.camera_fps
     config.process_every_n_frames = max(1, args.process_every_n_frames)
     config.detector_imgsz = max(128, args.detector_imgsz)
+    config.detector_device = args.detector_device
+    config.hide_windows = args.hide_windows
+    config.draw_results = not args.no_draw_results
+    config.show_generated_table = args.show_generated_table
+    config.use_calibration = args.use_calibration
     if not args.no_interface:
         start_interface("web", port=args.interface_port)
 
@@ -107,13 +112,16 @@ def main():
     detection_model = DetectionModel()
     if detection_model.model is None:
         return
-    table_renderer = GeneratedTableRenderer(config.generated_table_size)
+    table_renderer = None
+    if config.show_generated_table and not config.hide_windows:
+        table_renderer = GeneratedTableRenderer(config.generated_table_size)
 
     state_manager = StateManager()
     state_manager.initialize(config, state)
 
     # Create resizable window for fullscreen capability
-    cv2.namedWindow("Detection", cv2.WINDOW_NORMAL)
+    if not config.hide_windows:
+        cv2.namedWindow("Detection", cv2.WINDOW_NORMAL)
 
     import logging
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
@@ -149,7 +157,7 @@ def main():
         )
         state_manager.update(detections, labels)
 
-        if config.show_generated_table and not config.hide_windows:
+        if config.show_generated_table and not config.hide_windows and table_renderer is not None:
             markers = detection_model.get_ball_markers(processed_frame, detections)
             generated_table = table_renderer.render(processed_frame.shape, markers)
             for idx, text in enumerate(overlay_lines):

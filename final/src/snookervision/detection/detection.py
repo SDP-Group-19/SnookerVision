@@ -11,8 +11,34 @@ from snookervision.core import config
 logger = logging.getLogger(__name__)
 
 
+def resolve_torch_device():
+    requested = getattr(config, "detector_device", "auto")
+    if requested != "auto":
+        if requested == "cuda" and not torch.cuda.is_available():
+            logger.warning("CUDA requested but unavailable, falling back to CPU.")
+            return "cpu"
+        if requested == "mps":
+            mps_backend = getattr(torch.backends, "mps", None)
+            if mps_backend is None or not mps_backend.is_available():
+                logger.warning("MPS requested but unavailable, falling back to CPU.")
+                return "cpu"
+        return requested
+
+    if torch.cuda.is_available():
+        return "cuda"
+
+    mps_backend = getattr(torch.backends, "mps", None)
+    if mps_backend is not None and mps_backend.is_available():
+        return "mps"
+
+    return "cpu"
+
+
 class DetectionModel:
     def __init__(self):
+        self.device = resolve_torch_device()
+        if self.device == "cuda":
+            torch.backends.cudnn.benchmark = True
         self.model = self.load_model()
         self.labels = self.model.names
         self.total_objects = 0
@@ -38,9 +64,9 @@ class DetectionModel:
                 f"Model file not found at {config.detection_model_path}.")
             return None
         else:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
             model = YOLO(config.detection_model_path, task="detect")
-            model.to(device)
+            model.to(self.device)
+            logger.info(f"Detection model running on device: {self.device}")
             return model
 
     # Can have as a trigger function to change the model during runtime. Not used yet, waiting for liveconfig to be updated.
@@ -61,8 +87,7 @@ class DetectionModel:
         if self.frame_count % config.process_every_n_frames != 0:
             return self.last_result, self.labels
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        use_half = device == "cuda"
+        use_half = self.device == "cuda"
 
         with torch.inference_mode():
             results = self.model.predict(
@@ -70,7 +95,7 @@ class DetectionModel:
                 verbose=False,
                 conf=config.conf_threshold,
                 iou=0.40,
-                device=device,
+                device=self.device,
                 half=use_half,
                 imgsz=config.detector_imgsz,
                 stream=False,

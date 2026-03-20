@@ -10,6 +10,7 @@ class Config:
         self.camera_height = 1080
         self.camera_fps = 30
         self.camera_buffer_size = 1
+        self.detector_device = "auto"
         self.font_color = (255, 255, 255)
         self.font_scale = 1.0
         self.font_thickness = 2
@@ -48,7 +49,7 @@ class Config:
         self.hole_threshold = 30
         self.conf_threshold = 0.75
         self.draw_results = True
-        self.show_generated_table = True
+        self.show_generated_table = False
         self.generated_table_size = (560, 280)  # (width, height)
         self.generated_table_window_name = "Generated Table"
         self.enable_pot_notifications = True
@@ -62,10 +63,10 @@ class Config:
         self.hit_stationary_reset_seconds = 1.0
         self.pot_overlay_ttl_frames = 60
         self.hide_windows = False
-        self.use_calibration = False  # Disabled - causes zoom issues
+        self.use_calibration = True
         self.use_table_pts = False  # Disabled - select manually on first run
-        self.model_image_path = "./tests/src/data/model/training_images/"
+        self.model_image_path = "final/src/snookervision/data/model/training_images/"
         self.collect_model_images = False
-        self.calibration_params_path = "./tests/src/data/calibration_params.json"
-        self.calibration_images_path = "./tests/src/data/calibration_images/"
-        self.table_pts_path = "./tests/src/data/table_pts.json"
+        self.calibration_params_path = "final/src/snookervision/data/calibration_params.json"
+        self.calibration_images_path = "final/src/snookervision/data/calibration_images/"
+        self.table_pts_path = "final/src/snookervision/data/table_pts.json"

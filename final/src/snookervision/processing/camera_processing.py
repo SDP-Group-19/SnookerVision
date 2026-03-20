@@ -99,7 +99,7 @@ def handle_calibration(frame):
     if not config.use_calibration:
         return mtx, dist, newcameramtx, roi
 
-    if not os.path.exists(config.calibration_images_path):
+    if not os.path.exists(config.calibration_params_path) and not os.path.exists(config.calibration_images_path):
         logger.error("Calibration folder does not exist.")
         return mtx, dist, newcameramtx, roi
 
@@ -116,10 +116,7 @@ def undistort_frame(frame, mtx, dist, newcameramtx, roi):
         return frame
 
     undistorted_frame = cv2.undistort(frame, mtx, dist, None, newcameramtx)
-
-    # Crop the image to the ROI
-    x, y, w, h = roi
-    return undistorted_frame[y : y + h, x : x + w]
+    return undistorted_frame
 
 
 def select_points(event, x, y, _, param):
