@@ -1,0 +1,10 @@
+# Requires Python 3.10+ (recommended: 3.11)
+# Core runtime dependencies for SnookerVision (cv branch)
+opencv-contrib-python==4.11.0.86
+numpy==1.26.2
+ultralytics==8.3.109
+torch==2.6.0
+
+# App/runtime services
+python-socketio==5.13.0
+liveconfig==0.2.1b0
