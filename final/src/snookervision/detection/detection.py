@@ -351,25 +351,29 @@ class DetectionModel:
 
         return cv2.inpaint(frame, mask, 3, cv2.INPAINT_TELEA)
 
-    def handle_detection(self, frame, fps=0, overlay_lines=None):
+    def handle_detection(self, frame, fps=0, overlay_lines=None, show_live_view=True):
         detections = None
         labels = None
+        if not show_live_view:
+            self.destroy_camera_frame_window()
+            self.destroy_detection_drawing_window()
         if not config.use_model:
-            if not config.hide_windows:
+            if not config.hide_windows and show_live_view:
                 self.destroy_detection_drawing_window()
                 cv2.imshow("Camera Frame", frame)
         else:
             detections, labels = self.detect(frame)
-            if config.draw_results and not config.hide_windows:
+            if config.draw_results and not config.hide_windows and show_live_view:
                 self.destroy_camera_frame_window()
                 drawing_frame = frame.copy()
                 self.draw(drawing_frame, detections, fps, overlay_lines=overlay_lines)
                 cv2.imshow("Detection", drawing_frame)
-            elif not config.hide_windows:
+            elif not config.hide_windows and show_live_view:
                 self.destroy_detection_drawing_window()
                 cv2.imshow("Camera Frame", frame)
             elif config.hide_windows:
-                cv2.destroyAllWindows()
+                self.destroy_camera_frame_window()
+                self.destroy_detection_drawing_window()
 
         return detections, labels
 

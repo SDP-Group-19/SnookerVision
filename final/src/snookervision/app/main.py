@@ -104,12 +104,14 @@ def main():
     if detection_model.model is None:
         return
     table_renderer = GeneratedTableRenderer(config.generated_table_size)
+    show_live_view = not args.overlay_only
 
     state_manager = StateManager()
     state_manager.initialize(config, state)
 
-    # Create resizable window for fullscreen capability
-    cv2.namedWindow("Detection", cv2.WINDOW_NORMAL)
+    if show_live_view:
+        # Create resizable window for fullscreen capability
+        cv2.namedWindow("Detection", cv2.WINDOW_NORMAL)
 
     import logging
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
@@ -142,6 +144,7 @@ def main():
             processed_frame,
             fps,
             overlay_lines=overlay_lines,
+            show_live_view=show_live_view,
         )
         state_manager.update(detections, labels)
 
