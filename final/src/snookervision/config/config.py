@@ -11,6 +11,7 @@ class Config:
         self.camera_fps = 30
         self.camera_buffer_size = 1
         self.detector_device = "auto"
+        self.fast_mode = False
         self.font_color = (255, 255, 255)
         self.font_scale = 1.0
         self.font_thickness = 2
@@ -63,7 +64,7 @@ class Config:
         self.hit_stationary_reset_seconds = 1.0
         self.pot_overlay_ttl_frames = 60
         self.hide_windows = False
-        self.use_calibration = True
+        self.use_calibration = False
         self.use_table_pts = False  # Disabled - select manually on first run
         self.model_image_path = "final/src/snookervision/data/model/training_images/"
         self.collect_model_images = False

@@ -65,7 +65,7 @@ class StateManager():
             self.config.output_dimensions[1] - (2 * self.config.gantry_effective_range_y_px[0])))
         self._rebuild_overlay_lines()
 
-    def update(self, detections, labels):
+    def update(self, detections, labels=None):
         if not self.config or not self.state:
             logger.error(
                 "StateManager not initialized. Call initialize() first.")
@@ -87,7 +87,7 @@ class StateManager():
         num_balls = 0
         self.not_moved_counter = 0
 
-        if not detections or not detections[0].boxes:
+        if not detections:
             self._update_hit_order({}, current_time)
             pot_notifications = self._update_tracks_and_detect_pots(balls, current_time)
             self._feed_game_logic(balls, pot_notifications, current_time)
@@ -95,8 +95,8 @@ class StateManager():
             self._rebuild_overlay_lines()
             return
 
-        for ball in detections[0].boxes:
-            classname, middlex, middley = self._get_ball_info(ball, labels)
+        for ball in detections:
+            classname, middlex, middley = self._get_ball_info(ball)
             if classname in {"arm", "hole"}:
                 continue
 
@@ -132,14 +132,9 @@ class StateManager():
 
         self._update_and_send_balls(balls, corrected_white_ball, current_time)
 
-    def _get_ball_info(self, ball, labels):
-        xyxy_tensor = ball.xyxy.cpu()
-        xyxy = xyxy_tensor.numpy().squeeze()
-        xmin, ymin, xmax, ymax = map(int, xyxy.astype(int))
-        classidx: int = int(ball.cls.item())
-        classname: str = labels[classidx]
-        _middlex: int = int((xmin + xmax) // 2)
-        _middley: int = int((ymin + ymax) // 2)
+    def _get_ball_info(self, ball):
+        classname = ball["label"]
+        _middlex, _middley = ball["center"]
 
         middlex, middley = self._coords_clamped(_middlex, _middley)
         return classname, middlex, middley

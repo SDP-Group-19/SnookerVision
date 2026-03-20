@@ -50,6 +50,7 @@ def main():
     config.process_every_n_frames = max(1, args.process_every_n_frames)
     config.detector_imgsz = max(128, args.detector_imgsz)
     config.detector_device = args.detector_device
+    config.fast_mode = args.fast_mode
     config.hide_windows = args.hide_windows
     config.draw_results = not args.no_draw_results
     config.show_generated_table = args.show_generated_table
@@ -149,15 +150,21 @@ def main():
         if config.collect_model_images or config.collect_ae_data:
             capture_frame(None, processed_frame)
 
-        overlay_lines = state_manager.get_overlay_lines()
+        overlay_lines = None if config.fast_mode else state_manager.get_overlay_lines()
         detections, labels = detection_model.handle_detection(
             processed_frame,
             fps,
             overlay_lines=overlay_lines,
         )
-        state_manager.update(detections, labels)
+        if not config.fast_mode:
+            state_manager.update(detections)
 
-        if config.show_generated_table and not config.hide_windows and table_renderer is not None:
+        if (
+            not config.fast_mode
+            and config.show_generated_table
+            and not config.hide_windows
+            and table_renderer is not None
+        ):
             markers = detection_model.get_ball_markers(processed_frame, detections)
             generated_table = table_renderer.render(processed_frame.shape, markers)
             for idx, text in enumerate(overlay_lines):
@@ -179,7 +186,7 @@ def main():
             except cv2.error:
                 pass
 
-        if state.autoencoder is not None \
+        if not config.fast_mode and state.autoencoder is not None \
                 and config.use_obstruction_detection \
                 and config.use_model:
             table_only = detection_model.extract_bounding_boxes(

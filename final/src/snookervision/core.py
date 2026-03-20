@@ -185,6 +185,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--fast-mode",
+        action="store_true",
+        default=config.fast_mode,
+        help="Skip non-essential game logic and overlays to maximize throughput."
+    )
+
+    parser.add_argument(
         "--use-calibration",
         action="store_true",
         default=config.use_calibration,
