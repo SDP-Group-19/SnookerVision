@@ -40,6 +40,12 @@ state_manager.initialize(config, state)
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--stream",
+        type=str,
+        help="Network stream URL (e.g. tcp://192.168.1.10:8888)"
+    )
+
+    parser.add_argument(
         "--file",
         type=str,
         default=None,

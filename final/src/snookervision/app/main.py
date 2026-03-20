@@ -46,12 +46,28 @@ def main():
     if not args.no_interface:
         start_interface("web", port=args.interface_port)
 
-    if args.file is not None:
+    if hasattr(args, "stream") and args.stream is not None:
+        logger.info(f"Connecting to stream: {args.stream}")
+        camera = cv2.VideoCapture(args.stream, cv2.CAP_FFMPEG)
+
+        # 减少延迟
+        camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        # 等待流稳定
+        time.sleep(1)
+
+        ret, frame = camera.read()
+        if not ret:
+            logger.error("Failed to read from stream.")
+            return
+
+    elif args.file is not None:
         camera = cv2.VideoCapture(args.file)
         ret, frame = camera.read()
         if not ret:
             logger.error("Failed to read from video file.")
             return
+
     else:
         camera = load_camera()
         if camera is None:
@@ -59,6 +75,7 @@ def main():
                 "Camera initialization failed. Try --camera-port 1 (or 2) and --no-interface."
             )
             return
+
         ret, frame = camera.read()
         if not ret:
             logger.error("Failed to read from camera.")
@@ -112,6 +129,9 @@ def main():
     fps_log_interval = 2.0  # seconds
 
     while True:
+
+        for _ in range(3):
+            camera.read()
 
         ret, frame = camera.read()
         if not ret or frame is None:
