@@ -91,9 +91,14 @@ def main():
     
     # Handle table point selection if not disabled
     if not args.no_table_pts:
+        force_reselect = args.select_table_pts or args.file is not None
+        if args.file is not None and not args.select_table_pts:
+            logger.info(
+                "Video file input detected; please select 4 table corners for this clip."
+            )
         table_pts = manage_point_selection(
             processed_frame,
-            force_reselect=args.select_table_pts,
+            force_reselect=force_reselect,
         )
         if table_pts is None:
             logger.error("Table points not selected. Continuing without.")
@@ -116,12 +121,14 @@ def main():
     if detection_model.model is None:
         return
     table_renderer = GeneratedTableRenderer(config.generated_table_size)
+    show_live_view = not args.overlay_only
 
     state_manager = StateManager()
     state_manager.initialize(config, state)
 
-    # Create resizable window for fullscreen capability
-    cv2.namedWindow("Detection", cv2.WINDOW_NORMAL)
+    if show_live_view:
+        # Create resizable window for fullscreen capability
+        cv2.namedWindow("Detection", cv2.WINDOW_NORMAL)
 
     import logging
     logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
@@ -157,6 +164,7 @@ def main():
             processed_frame,
             fps,
             overlay_lines=overlay_lines,
+            show_live_view=show_live_view,
         )
         state_manager.update(detections, labels)
 

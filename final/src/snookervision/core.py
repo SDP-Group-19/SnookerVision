@@ -94,6 +94,13 @@ def parse_args():
         default=False
     )
 
+    parser.add_argument(
+        "--overlay-only",
+        action="store_true",
+        help="Show only the generated table overlay window, not the live camera view.",
+        default=False
+    )
+
     return parser.parse_args()
 
 

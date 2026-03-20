@@ -137,12 +137,19 @@ def load_table_pts():
         )
         return None
 
-    with open(config.table_pts_path, "r") as f:
-        data = json.load(f)
+    try:
+        with open(config.table_pts_path, "r") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.error(
+            f"Failed to load table points from {config.table_pts_path}: {e}. "
+            "Please reselect table points."
+        )
+        return None
 
     try:
         return np.array(data["table_pts"], dtype=np.float32)
-    except KeyError:
+    except (KeyError, TypeError, ValueError):
         logger.error("Invalid table points format. Please select table points again.")
         return None
 
@@ -209,6 +216,15 @@ def manage_point_selection(frame, force_reselect=False):
                     config.font_color,
                     config.font_thickness,
                 )
+                cv2.putText(
+                    display_frame,
+                    "Longer table side is auto-mapped to horizontal",
+                    (20, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 255),
+                    2,
+                )
 
             cv2.imshow("Select Table Points", display_frame)
             key = cv2.waitKey(1) & 0xFF
@@ -231,7 +247,34 @@ def manage_point_selection(frame, force_reselect=False):
 
 
 def sort_points(table_pts):
-    table_pts = sorted(table_pts, key=lambda x: x[1])
-    top_pts = sorted(table_pts[:2], key=lambda x: x[0])
-    bottom_pts = sorted(table_pts[2:], key=lambda x: x[0])
-    return [top_pts[0], top_pts[1], bottom_pts[0], bottom_pts[1]]
+    pts = np.array(table_pts, dtype=np.float32)
+    if pts.shape != (4, 2):
+        return table_pts
+
+    # Order as top-left, top-right, bottom-right, bottom-left.
+    s = pts.sum(axis=1)
+    diff = np.diff(pts, axis=1)
+    tl = pts[np.argmin(s)]
+    br = pts[np.argmax(s)]
+    tr = pts[np.argmin(diff)]
+    bl = pts[np.argmax(diff)]
+    ordered = np.array([tl, tr, br, bl], dtype=np.float32)
+
+    def side_length(a, b):
+        return float(np.linalg.norm(a - b))
+
+    # Compare average opposing side lengths.
+    horizontal_len = (side_length(ordered[0], ordered[1]) + side_length(ordered[3], ordered[2])) / 2.0
+    vertical_len = (side_length(ordered[0], ordered[3]) + side_length(ordered[1], ordered[2])) / 2.0
+
+    # If vertical is longer, rotate ordering so the longer dimension maps to horizontal output.
+    if vertical_len > horizontal_len:
+        ordered = np.array([ordered[3], ordered[0], ordered[1], ordered[2]], dtype=np.float32)
+
+    # Return in expected transform order: TL, TR, BL, BR.
+    return [
+        tuple(ordered[0].astype(int)),
+        tuple(ordered[1].astype(int)),
+        tuple(ordered[3].astype(int)),
+        tuple(ordered[2].astype(int)),
+    ]
