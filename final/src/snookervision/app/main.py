@@ -43,6 +43,12 @@ def main():
     fps = 0.0
     args = parse_args()
     config.camera_port = args.camera_port
+    config.camera_source = args.camera_source
+    config.camera_width = args.camera_width
+    config.camera_height = args.camera_height
+    config.camera_fps = args.camera_fps
+    config.process_every_n_frames = max(1, args.process_every_n_frames)
+    config.detector_imgsz = max(128, args.detector_imgsz)
     if not args.no_interface:
         start_interface("web", port=args.interface_port)
 
@@ -56,7 +62,7 @@ def main():
         camera = load_camera()
         if camera is None:
             logger.error(
-                "Camera initialization failed. Try --camera-port 1 (or 2) and --no-interface."
+                "Camera initialization failed. Try --camera-source http://<raspberrypi>:8000/stream.mjpg or --camera-port 1 and --no-interface."
             )
             return
         ret, frame = camera.read()

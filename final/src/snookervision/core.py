@@ -7,6 +7,7 @@ import cv2
 import time
 import os
 import platform
+import threading
 from random import randint
 
 config = liveinstance("config")(Config())
@@ -35,6 +36,42 @@ if config.use_networking:
 # Initialize the state manager
 state_manager = StateManager()
 state_manager.initialize(config, state)
+
+
+class ThreadedCamera:
+    """
+    Continuously grabs frames and keeps only the newest one to avoid latency buildup.
+    """
+
+    def __init__(self, camera):
+        self.camera = camera
+        self.lock = threading.Lock()
+        self.running = True
+        self.latest_frame = None
+        self.latest_ok = False
+        self.thread = threading.Thread(target=self._reader, daemon=True)
+        self.thread.start()
+
+    def _reader(self):
+        while self.running:
+            ok, frame = self.camera.read()
+            with self.lock:
+                self.latest_ok = ok
+                self.latest_frame = frame if ok else None
+            if not ok:
+                time.sleep(0.01)
+
+    def read(self):
+        with self.lock:
+            if self.latest_frame is None:
+                return False, None
+            return self.latest_ok, self.latest_frame.copy()
+
+    def release(self):
+        self.running = False
+        if self.thread.is_alive():
+            self.thread.join(timeout=1.0)
+        self.camera.release()
 
 
 def parse_args():
@@ -68,6 +105,48 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--camera-source",
+        type=str,
+        default=config.camera_source,
+        help="Camera source URL/device path, e.g. http://raspberrypi.local:8000/stream.mjpg"
+    )
+
+    parser.add_argument(
+        "--camera-width",
+        type=int,
+        default=config.camera_width,
+        help="Requested capture width."
+    )
+
+    parser.add_argument(
+        "--camera-height",
+        type=int,
+        default=config.camera_height,
+        help="Requested capture height."
+    )
+
+    parser.add_argument(
+        "--camera-fps",
+        type=int,
+        default=config.camera_fps,
+        help="Requested camera FPS."
+    )
+
+    parser.add_argument(
+        "--process-every-n-frames",
+        type=int,
+        default=config.process_every_n_frames,
+        help="Run YOLO every Nth frame and reuse the last detection on skipped frames."
+    )
+
+    parser.add_argument(
+        "--detector-imgsz",
+        type=int,
+        default=config.detector_imgsz,
+        help="YOLO inference image size. Lower values usually increase FPS."
+    )
+
+    parser.add_argument(
         "--no-calibration",
         action="store_true",
         help="Skip camera calibration/undistortion.",
@@ -93,10 +172,22 @@ def parse_args():
 
 def load_camera():
     """
-    This function loads the camera from the camera port specified in the config.
+    This function loads the camera from a configured network source or local camera port.
     """
     try:
         logger.info("Starting camera...")
+        if config.camera_source:
+            logger.info(f"Opening remote camera source: {config.camera_source}")
+            camera = cv2.VideoCapture(config.camera_source, apiPreference=cv2.CAP_ANY)
+            if not camera.isOpened():
+                logger.error(
+                    f"Could not open camera source {config.camera_source}."
+                )
+                return None
+            if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
+                camera.set(cv2.CAP_PROP_BUFFERSIZE, config.camera_buffer_size)
+            return ThreadedCamera(camera)
+
         system = platform.system()
         if system == "Darwin":
             backend = cv2.CAP_AVFOUNDATION
@@ -114,11 +205,13 @@ def load_camera():
             )
             return None
 
-        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-        camera.set(cv2.CAP_PROP_FPS, 30)
+        if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
+            camera.set(cv2.CAP_PROP_BUFFERSIZE, config.camera_buffer_size)
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, config.camera_width)
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, config.camera_height)
+        camera.set(cv2.CAP_PROP_FPS, config.camera_fps)
         time.sleep(2.0)
-        return camera
+        return ThreadedCamera(camera)
     except Exception as e:
         logger.error(f"Error starting camera: {e}")
         return

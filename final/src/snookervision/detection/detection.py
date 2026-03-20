@@ -61,25 +61,22 @@ class DetectionModel:
         if self.frame_count % config.process_every_n_frames != 0:
             return self.last_result, self.labels
 
-        # Detect available device and optimize based on hardware
         device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        # Adjust settings based on device
-        # For CPU: don't use half precision, lower batch size
         use_half = device == "cuda"
 
+        with torch.inference_mode():
+            results = self.model.predict(
+                source=frame,
+                verbose=False,
+                conf=config.conf_threshold,
+                iou=0.40,
+                device=device,
+                half=use_half,
+                imgsz=config.detector_imgsz,
+                stream=False,
+            )
 
-        results = self.model(
-            frame,
-            verbose=False,
-            conf=config.conf_threshold,
-            iou=0.40,
-            device=device,
-            half=use_half,
-            stream=True
-        )
-
-        result = next(results, None)
+        result = results[0] if results else None
         if result is None or result.boxes is None:
             return None, None
 
@@ -306,9 +303,6 @@ class DetectionModel:
                            cv2.FONT_HERSHEY_SIMPLEX, 0.38, (255, 255, 255), 1)
 
         self._draw_notifications(frame, overlay_lines)
-
-        cv2.namedWindow("Detection", cv2.WINDOW_NORMAL)
-        cv2.imshow("Detection", frame)
 
     def _draw_notifications(self, frame, overlay_lines):
         if not overlay_lines:

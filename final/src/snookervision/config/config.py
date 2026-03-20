@@ -5,6 +5,11 @@ from liveconfig import liveclass
 class Config:
     def __init__(self):
         self.camera_port = 1
+        self.camera_source = None
+        self.camera_width = 1920
+        self.camera_height = 1080
+        self.camera_fps = 30
+        self.camera_buffer_size = 1
         self.font_color = (255, 255, 255)
         self.font_scale = 1.0
         self.font_thickness = 2
@@ -37,6 +42,7 @@ class Config:
         self.use_hidden_balls = False
         self.use_model = True
         self.process_every_n_frames = 2
+        self.detector_imgsz = 960
         self.detection_model_path = "final/src/snookervision/data/model/best_color.pt"
         self.position_threshold = 6
         self.hole_threshold = 30
