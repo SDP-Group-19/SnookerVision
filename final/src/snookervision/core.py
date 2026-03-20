@@ -46,6 +46,7 @@ class ThreadedCamera:
     def __init__(self, camera):
         self.camera = camera
         self.lock = threading.Lock()
+        self.condition = threading.Condition(self.lock)
         self.running = True
         self.latest_frame = None
         self.latest_ok = False
@@ -55,14 +56,22 @@ class ThreadedCamera:
     def _reader(self):
         while self.running:
             ok, frame = self.camera.read()
-            with self.lock:
+            with self.condition:
                 self.latest_ok = ok
                 self.latest_frame = frame if ok else None
+                self.condition.notify_all()
             if not ok:
                 time.sleep(0.01)
 
-    def read(self):
-        with self.lock:
+    def read(self, timeout=None):
+        with self.condition:
+            if timeout is not None and self.latest_frame is None:
+                end_time = time.time() + timeout
+                while self.running and self.latest_frame is None:
+                    remaining = end_time - time.time()
+                    if remaining <= 0:
+                        break
+                    self.condition.wait(timeout=remaining)
             if self.latest_frame is None:
                 return False, None
             return self.latest_ok, self.latest_frame.copy()

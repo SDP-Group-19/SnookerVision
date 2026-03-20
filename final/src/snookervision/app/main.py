@@ -65,9 +65,12 @@ def main():
                 "Camera initialization failed. Try --camera-source http://<raspberrypi>:8000/stream.mjpg or --camera-port 1 and --no-interface."
             )
             return
-        ret, frame = camera.read()
+        ret, frame = camera.read(timeout=5.0)
         if not ret:
-            logger.error("Failed to read from camera.")
+            logger.error(
+                "Failed to read the first frame from camera within 5 seconds. "
+                "If you are using a Raspberry Pi stream, verify the Pi server is running and the stream URL opens in a browser."
+            )
             return
 
     processed_frame = frame
