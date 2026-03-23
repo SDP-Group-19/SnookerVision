@@ -71,3 +71,11 @@ class Config:
         self.calibration_params_path = "final/src/snookervision/data/calibration_params.json"
         self.calibration_images_path = "final/src/snookervision/data/calibration_images/"
         self.table_pts_path = "final/src/snookervision/data/table_pts.json"
+        # LED strip settings (ESP32 via TCP)
+        self.led_enabled = False
+        self.led_arduino_ip = "192.168.1.42"
+        self.led_arduino_port = 4210
+        self.led_pulse_on_time = 0.6
+        self.led_pulse_off_time = 0.4
+        self.led_reposition_threshold_px = 40
+        self.led_reposition_confirm_frames = 5

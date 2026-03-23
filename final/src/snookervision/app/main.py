@@ -55,6 +55,9 @@ def main():
     config.draw_results = not args.no_draw_results
     config.show_generated_table = args.show_generated_table
     config.use_calibration = args.use_calibration
+    config.led_enabled = args.led_enabled
+    config.led_arduino_ip = args.led_ip
+    config.led_arduino_port = args.led_port
     if not args.no_interface:
         start_interface("web", port=args.interface_port)
 
@@ -206,11 +209,18 @@ def main():
             logging.info(f"Current FPS: {fps:.2f}")
             last_fps_log_time = now
 
-        if cv2.waitKey(1) & 0xFF == ord("q"):
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("q"):
             break
+        elif key == ord("r") and state_manager.foul_reposition_active:
+            # Skip current ball or clear if last one
+            state_manager.skip_reposition_target()
 
     camera.release()
     cv2.destroyAllWindows()
+    state_manager.clear_foul_leds()
+    if state_manager.led_controller:
+        state_manager.led_controller.close()
     if config.use_networking:
         state.network.disconnect()
 

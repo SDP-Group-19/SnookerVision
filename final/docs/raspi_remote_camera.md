@@ -54,7 +54,7 @@ python3 final/src/snookervision/app/main.py \
 
 Final
 ```bash
-python .\final\src\snookervision\app\main.py --camera-source http://192.168.137.225:8000/stream.mjpg --camera-width 1280 --camera-width 720 --detector-imgsz 512 --process-every-n-frames 1  --no-draw-results --no-interface --fast-mode --no-calibration --no-table-pts
+python .\final\src\snookervision\app\main.py --camera-source http://192.168.137.225:8000/stream.mjpg --camera-width 1280 --camera-height 720 --detector-imgsz 512 --process-every-n-frames 1  --no-draw-results --no-interface --no-calibration --no-table-pts
 ```
 
 If throughput is still too low, try these in order:

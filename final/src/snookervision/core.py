@@ -219,6 +219,27 @@ def parse_args():
         default=False
     )
 
+    parser.add_argument(
+        "--led-enabled",
+        action="store_true",
+        default=config.led_enabled,
+        help="Enable LED strip reposition indicator via ESP32."
+    )
+
+    parser.add_argument(
+        "--led-ip",
+        type=str,
+        default=config.led_arduino_ip,
+        help="ESP32 IP address for LED control (default: 192.168.1.42)."
+    )
+
+    parser.add_argument(
+        "--led-port",
+        type=int,
+        default=config.led_arduino_port,
+        help="ESP32 TCP port for LED control (default: 4210)."
+    )
+
     return parser.parse_args()
 
 
