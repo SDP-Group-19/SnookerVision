@@ -8,3 +8,4 @@ torch==2.6.0
 # App/runtime services
 python-socketio==5.13.0
 liveconfig==0.2.1b0
+paho-mqtt==2.1.0

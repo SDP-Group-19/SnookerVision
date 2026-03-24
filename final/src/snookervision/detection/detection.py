@@ -185,14 +185,20 @@ class DetectionModel:
         return filtered_results
 
     def _is_likely_ball(self, area):
+        if config.fast_mode or not config.use_table_pts:
+            return area > 0
         return area > config.ball_area_range[0] \
             and area < config.ball_area_range[1]
 
     def _is_likely_arm(self, area):
+        if config.fast_mode or not config.use_table_pts:
+            return area > 0
         return area > config.arm_area_range[0] \
             and area < config.arm_area_range[1]
 
     def _is_likely_hole(self, xmin, ymin, xmax, ymax):
+        if config.fast_mode or not config.use_table_pts:
+            return True
         middlex = int((xmin + xmax) / 2)
         middley = int((ymin + ymax) / 2)
 
