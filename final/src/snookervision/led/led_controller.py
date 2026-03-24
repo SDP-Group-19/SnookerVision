@@ -1,12 +1,11 @@
 import socket
 import logging
 import threading
-import time
 
 logger = logging.getLogger(__name__)
 
 # TCP protocol matching the ESP32 Arduino firmware:
-#   "ball: x,y,r,g,b\n"   - light LEDs at table position (x,y) with colour
+#   "ball: x,y,r,g,b\n"   - light LEDs nearest to table position (x,y)
 #   "resize: w,h\n"        - set table dimensions for coordinate scaling
 #   "clear\n"              - turn off all LEDs
 
@@ -17,8 +16,6 @@ class LEDController:
         self.arduino_port = arduino_port
         self._sock = None
         self._lock = threading.Lock()
-        self._pulse_thread = None
-        self._pulse_stop = threading.Event()
 
     def connect(self):
         with self._lock:
@@ -80,35 +77,7 @@ class LEDController:
             if self._reconnect():
                 self._send("clear\n")
 
-    def start_pulse(self, x, y, color=(255, 0, 0), on_time=0.6, off_time=0.4):
-        """Pulse LEDs at position (x,y) on/off in a background thread."""
-        self.stop_pulse()
-        self._pulse_stop.clear()
-        r, g, b = color
-        self._pulse_thread = threading.Thread(
-            target=self._pulse_loop,
-            args=(x, y, r, g, b, on_time, off_time),
-            daemon=True,
-        )
-        self._pulse_thread.start()
-
-    def _pulse_loop(self, x, y, r, g, b, on_time, off_time):
-        while not self._pulse_stop.is_set():
-            self.send_ball(x, y, r, g, b)
-            if self._pulse_stop.wait(on_time):
-                break
-            self.send_clear()
-            if self._pulse_stop.wait(off_time):
-                break
-
-    def stop_pulse(self):
-        self._pulse_stop.set()
-        if self._pulse_thread is not None and self._pulse_thread.is_alive():
-            self._pulse_thread.join(timeout=2.0)
-        self._pulse_thread = None
-
     def close(self):
-        self.stop_pulse()
         with self._lock:
             if self._sock is not None:
                 try:

@@ -50,7 +50,7 @@ class Config:
         self.hole_threshold = 30
         self.conf_threshold = 0.75
         self.draw_results = True
-        self.show_generated_table = False
+        self.show_generated_table = True
         self.generated_table_size = (560, 280)  # (width, height)
         self.generated_table_window_name = "Generated Table"
         self.enable_pot_notifications = True
@@ -75,7 +75,5 @@ class Config:
         self.led_enabled = False
         self.led_arduino_ip = "192.168.1.42"
         self.led_arduino_port = 4210
-        self.led_pulse_on_time = 0.6
-        self.led_pulse_off_time = 0.4
         self.led_reposition_threshold_px = 40
-        self.led_reposition_confirm_frames = 5
+        self.led_reposition_stationary_seconds = 3.0

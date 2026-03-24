@@ -82,7 +82,7 @@ class StateManager():
         self.shot_start_positions = {}
         self.reposition_queue = []
         self.reposition_index = 0
-        self.reposition_confirm_count = 0
+        self.reposition_settled_since = None
         self.foul_reposition_active = False
 
     def initialize(self, config, state):
@@ -457,7 +457,7 @@ class StateManager():
 
         self.reposition_queue = queue
         self.reposition_index = 0
-        self.reposition_confirm_count = 0
+        self.reposition_settled_since = None
         self.foul_reposition_active = True
         logger.info(
             f"[LED] Reposition queue: "
@@ -466,18 +466,16 @@ class StateManager():
         self._light_current_reposition_target()
 
     def _light_current_reposition_target(self):
-        """Send the current queue entry's position+colour to the LED strips."""
+        """Clear LEDs then light the current queue entry's position+colour."""
         if not self.led_controller:
             return
         if self.reposition_index >= len(self.reposition_queue):
             return
         target = self.reposition_queue[self.reposition_index]
-        self.led_controller.start_pulse(
-            target["x"], target["y"],
-            color=target["led_color"],
-            on_time=self.config.led_pulse_on_time,
-            off_time=self.config.led_pulse_off_time,
-        )
+        r, g, b = target["led_color"]
+        self.led_controller.send_clear()
+        self.led_controller.send_ball(target["x"], target["y"], r, g, b)
+        self.reposition_settled_since = None
         logger.info(
             f"[LED] Lighting {target['color_name'].upper()} "
             f"at ({target['x']}, {target['y']}) "
@@ -485,59 +483,55 @@ class StateManager():
         )
 
     def _check_reposition_progress(self, balls):
-        """Check if the current target ball has been placed near its position.
-
-        When confirmed for enough frames, advance to the next ball in the queue.
-        """
+        """Check if the current target ball is placed and stationary for N seconds."""
         if self.reposition_index >= len(self.reposition_queue):
             self.clear_foul_leds()
             return
 
+        now = time.time()
         target = self.reposition_queue[self.reposition_index]
         threshold = max(10, int(self.config.led_reposition_threshold_px))
-        needed_frames = max(1, int(self.config.led_reposition_confirm_frames))
+        needed_seconds = max(0.5, float(self.config.led_reposition_stationary_seconds))
 
-        # Check if any ball of the target colour is near the target position
+        # Is a ball of the target colour near the target position?
         detected_positions = balls.get(target["color_name"], [])
-        placed = False
+        placed_and_still = False
         for pos in detected_positions:
             dist = math.hypot(pos["x"] - target["x"], pos["y"] - target["y"])
             if dist <= threshold:
-                placed = True
+                # Ball is near target — check if it's stationary
+                if not self._colour_is_moving(target["color_name"], balls, threshold):
+                    placed_and_still = True
                 break
 
-        if placed:
-            self.reposition_confirm_count += 1
-            if self.reposition_confirm_count >= needed_frames:
+        if placed_and_still:
+            if self.reposition_settled_since is None:
+                self.reposition_settled_since = now
+            elif (now - self.reposition_settled_since) >= needed_seconds:
                 logger.info(
                     f"[LED] {target['color_name'].upper()} repositioned OK "
                     f"[{self.reposition_index + 1}/{len(self.reposition_queue)}]"
                 )
                 self.reposition_index += 1
-                self.reposition_confirm_count = 0
+                self.reposition_settled_since = None
 
                 if self.reposition_index >= len(self.reposition_queue):
-                    # All balls repositioned
                     self.clear_foul_leds()
                     logger.info("[LED] All balls repositioned")
                 else:
-                    # Light up the next ball
-                    if self.led_controller:
-                        self.led_controller.stop_pulse()
-                        self.led_controller.send_clear()
                     self._light_current_reposition_target()
         else:
-            self.reposition_confirm_count = 0
+            # Ball moved or not near target — reset timer
+            self.reposition_settled_since = None
 
     def clear_foul_leds(self):
-        """Stop all LED indication and reset the reposition queue."""
+        """Turn off LEDs and reset the reposition queue."""
         if self.led_controller:
-            self.led_controller.stop_pulse()
             self.led_controller.send_clear()
         self.foul_reposition_active = False
         self.reposition_queue = []
         self.reposition_index = 0
-        self.reposition_confirm_count = 0
+        self.reposition_settled_since = None
         logger.info("[LED] Foul indicator cleared")
 
     def skip_reposition_target(self):
@@ -545,14 +539,11 @@ class StateManager():
         if not self.foul_reposition_active:
             return
         self.reposition_index += 1
-        self.reposition_confirm_count = 0
+        self.reposition_settled_since = None
         if self.reposition_index >= len(self.reposition_queue):
             self.clear_foul_leds()
             logger.info("[LED] Reposition skipped — all done")
         else:
-            if self.led_controller:
-                self.led_controller.stop_pulse()
-                self.led_controller.send_clear()
             self._light_current_reposition_target()
 
     def _feed_game_logic(self, balls, pot_notifications, now):
