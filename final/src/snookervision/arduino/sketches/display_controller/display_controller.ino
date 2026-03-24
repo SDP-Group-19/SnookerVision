@@ -48,6 +48,7 @@ constexpr uint8_t kTurnLight2Index = 1;
 enum class ButtonAction : uint8_t {
   AdjustScore,
   ResetScores,
+  TogglePlayer,
   PrintOnly,
 };
 
@@ -85,7 +86,7 @@ ButtonState buttons[] = {
     {kDisplay2DownButtonPin, ButtonAction::AdjustScore, 1, -1, "BUTTON DISPLAY_2_DOWN", HIGH, HIGH, 0},
     {kFullResetButtonPin, ButtonAction::ResetScores, 0, 0, "BUTTON FULL_RESET", HIGH, HIGH, 0},
     {kLastPositionButtonPin, ButtonAction::PrintOnly, 0, 0, "BUTTON LAST_POSITION", HIGH, HIGH, 0},
-    {kChangePlayerButtonPin, ButtonAction::PrintOnly, 0, 0, "BUTTON CHANGE_PLAYER", HIGH, HIGH, 0},
+    {kChangePlayerButtonPin, ButtonAction::TogglePlayer, 0, 0, "BUTTON CHANGE_PLAYER", HIGH, HIGH, 0},
 };
 
 constexpr uint8_t kButtonCount = sizeof(buttons) / sizeof(buttons[0]);
@@ -93,6 +94,7 @@ constexpr uint8_t kButtonCount = sizeof(buttons) / sizeof(buttons[0]);
 String inputBuffer;
 rgb_lcd lcd;
 ChainableLED rgbLeds(kTurnLightDataPin, kTurnLightClockPin, kRgbLedCount);
+uint8_t activeTurnLightIndex = kTurnLight2Index;
 
 bool parseLong(const String &value, long &result);
 
@@ -204,6 +206,24 @@ void setAllRgbLeds(uint8_t red, uint8_t green, uint8_t blue) {
   for (uint8_t i = 0; i < kRgbLedCount; ++i) {
     setRgbLed(i, red, green, blue);
   }
+}
+
+void showActiveTurnLight() {
+  setAllRgbLeds(0, 0, 0);
+  setRgbLed(activeTurnLightIndex, 255, 255, 255);
+
+  Serial.print(F("ACTIVE_PLAYER "));
+  Serial.println(turnLightName(activeTurnLightIndex));
+}
+
+void toggleActiveTurnLight() {
+  if (activeTurnLightIndex == kTurnLight1Index) {
+    activeTurnLightIndex = kTurnLight2Index;
+  } else {
+    activeTurnLightIndex = kTurnLight1Index;
+  }
+
+  showActiveTurnLight();
 }
 
 bool parseLedCommand(const String &payload) {
@@ -482,6 +502,8 @@ void handleButton(ButtonState &button) {
         applyScoreChange(button.displayIndex, button.delta, F("ADD"));
       } else if (button.action == ButtonAction::ResetScores) {
         resetScores();
+      } else if (button.action == ButtonAction::TogglePlayer) {
+        toggleActiveTurnLight();
       }
 
       Serial.println(button.message);
@@ -515,7 +537,7 @@ void initializeLcd() {
 }
 
 void initializeRgbLeds() {
-  setAllRgbLeds(0, 0, 0);
+  showActiveTurnLight();
 }
 
 }  // namespace
