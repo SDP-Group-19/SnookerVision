@@ -4,6 +4,18 @@
 #include <Wire.h>
 #include <rgb_lcd.h>
 
+/*
+Serial commands:
+SET 1 12
+SET 2 34
+LCD Player 1|At table
+LIGHT 1 255 0 0
+LIGHT 2 0 255 0
+LIGHTOFF
+RESET
+STATUS
+*/
+
 namespace {
 
 // Hardware map: change these pin numbers to match your wiring.
