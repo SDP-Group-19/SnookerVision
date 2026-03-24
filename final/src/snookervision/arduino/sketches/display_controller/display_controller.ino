@@ -21,12 +21,12 @@ constexpr uint8_t kDisplay2ClkPin = 4;
 constexpr uint8_t kDisplay2DioPin = 5;
 
 constexpr uint8_t kDisplay1UpButtonPin = 6;
-constexpr uint8_t kDisplay1DownButtonPin = 7;
+constexpr uint8_t kDisplay1DownButtonPin = 13;
 constexpr uint8_t kDisplay2UpButtonPin = 8;
-constexpr uint8_t kDisplay2DownButtonPin = 10;
-constexpr uint8_t kFullResetButtonPin = 11;
-constexpr uint8_t kLastPositionButtonPin = A0;
-constexpr uint8_t kChangePlayerButtonPin = A1;
+constexpr uint8_t kDisplay2DownButtonPin = 22;
+constexpr uint8_t kFullResetButtonPin = 9;
+constexpr uint8_t kLastPositionButtonPin = 10;
+constexpr uint8_t kChangePlayerButtonPin = 7;
 
 constexpr uint8_t kTurnLightDataPin = 11;
 constexpr uint8_t kTurnLightClockPin = 12;
