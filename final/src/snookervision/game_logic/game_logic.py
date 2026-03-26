@@ -106,11 +106,15 @@ def foul_value(*balls: BallType) -> int:
     return max(4, *(BALL_VALUE[b] for b in balls if b in BALL_VALUE))
 
 def buzz_cue():
-    publish.single(
-        "team/vibrate",
-        payload="buzz",
-        hostname="broker.hivemq.com"
-    )
+    try:
+        publish.single(
+            "team/vibrate",
+            payload="buzz",
+            hostname="broker.hivemq.com",
+            connect_timeout=1,
+        )
+    except Exception:
+        pass
 
 def _is_colour(b: BallType) -> bool:
     return b in {

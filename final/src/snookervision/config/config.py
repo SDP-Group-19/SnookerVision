@@ -48,9 +48,9 @@ class Config:
         self.detection_model_path = "final/src/snookervision/data/model/best_color.pt"
         self.position_threshold = 6
         self.hole_threshold = 30
-        self.conf_threshold = 0.75
+        self.conf_threshold = 0.15
         self.draw_results = True
-        self.show_generated_table = True
+        self.show_generated_table = False
         self.generated_table_size = (560, 280)  # (width, height)
         self.generated_table_window_name = "Generated Table"
         self.enable_pot_notifications = True
@@ -73,7 +73,12 @@ class Config:
         self.table_pts_path = "final/src/snookervision/data/table_pts.json"
         # LED strip settings (ESP32 via TCP)
         self.led_enabled = False
-        self.led_arduino_ip = "192.168.1.42"
-        self.led_arduino_port = 4210
+        self.led_arduino_ip = "192.168.4.1"
+        self.led_arduino_port = 5000
+        self.led_foul_flash_seconds = 3.0
         self.led_reposition_threshold_px = 40
-        self.led_reposition_stationary_seconds = 3.0
+        self.led_reposition_confirm_frames = 5
+        self.led_reposition_hold_seconds = 3.0
+        # Trajectory prediction
+        self.show_trajectory = True
+        self.trajectory_led = False

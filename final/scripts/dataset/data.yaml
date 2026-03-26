@@ -1,0 +1,5 @@
+path: D:/Learn/2025-2026SM2/SDP/SnookerVision/final/scripts/dataset
+train: images/train
+val: images/val
+nc: 9
+names: ['black-ball', 'blue-ball', 'brown-ball', 'green-ball', 'pink-ball', 'pocket', 'red-ball', 'white-ball', 'yellow-ball']

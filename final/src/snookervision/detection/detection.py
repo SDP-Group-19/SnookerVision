@@ -47,7 +47,9 @@ class DetectionModel:
         if self.device == "cuda":
             torch.backends.cudnn.benchmark = True
         self.model = self.load_model()
-        self.labels = self.model.names if self.model is not None else {}
+        self.labels = self._normalize_labels(
+            self.model.names if self.model is not None else {}
+        )
         self.total_objects = 0
         self.total_balls = 0
         self.hole_positions = [
@@ -64,6 +66,36 @@ class DetectionModel:
         self.ball_class_names = {
             "white", "black", "red", "yellow", "green", "brown", "blue", "pink"
         }
+
+    def _normalize_labels(self, names):
+        """Normalize model class names so the rest of the codebase works.
+
+        Handles models that use 'black-ball' style names by stripping '-ball',
+        and maps 'pocket' to 'hole' for compatibility.
+        """
+        normalized = {}
+        for idx, name in names.items():
+            n = name.lower().replace("-ball", "").replace("_ball", "")
+            if n == "pocket":
+                n = "hole"
+            normalized[idx] = n
+        return normalized
+
+    def _label_to_bbox_color(self, classname):
+        """Map a normalized class name to a bbox color."""
+        color_map = {
+            "red": (0, 0, 255),
+            "white": (255, 255, 255),
+            "yellow": (0, 255, 255),
+            "green": (0, 255, 0),
+            "blue": (255, 0, 0),
+            "brown": (42, 42, 165),
+            "pink": (203, 192, 255),
+            "black": (0, 0, 0),
+            "hole": (128, 128, 128),
+            "arm": (0, 165, 255),
+        }
+        return color_map.get(classname, (255, 255, 255))
 
     def load_model(self):
         if not os.path.exists(config.detection_model_path):
@@ -132,7 +164,7 @@ class DetectionModel:
                 {
                     "classidx": classidx,
                     "label": classname,
-                    "color": config.bbox_colors[classidx % len(config.bbox_colors)],
+                    "color": self._label_to_bbox_color(classname),
                     "bbox": (xmin, ymin, xmax, ymax),
                     "center": ((xmin + xmax) // 2, (ymin + ymax) // 2),
                     "conf": float(conf),

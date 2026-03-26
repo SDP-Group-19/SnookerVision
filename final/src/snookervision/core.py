@@ -240,6 +240,20 @@ def parse_args():
         help="ESP32 TCP port for LED control (default: 4210)."
     )
 
+    parser.add_argument(
+        "--show-trajectory",
+        action="store_true",
+        default=config.show_trajectory,
+        help="Show predicted cue ball trajectory lines."
+    )
+
+    parser.add_argument(
+        "--no-trajectory",
+        action="store_true",
+        default=False,
+        help="Disable trajectory prediction."
+    )
+
     return parser.parse_args()
 
 

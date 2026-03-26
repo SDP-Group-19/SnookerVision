@@ -21,6 +21,7 @@ from snookervision.detection import DetectionModel
 from snookervision import config, state, load_camera, parse_args, capture_frame
 from snookervision.state import StateManager
 from snookervision.visualization import GeneratedTableRenderer
+from snookervision.trajectory import TrajectoryPredictor, CueDetector, TrajectoryRenderer
 
 
 
@@ -58,6 +59,7 @@ def main():
     config.led_enabled = args.led_enabled
     config.led_arduino_ip = args.led_ip
     config.led_arduino_port = args.led_port
+    config.show_trajectory = args.show_trajectory and not args.no_trajectory
     if not args.no_interface:
         start_interface("web", port=args.interface_port)
 
@@ -120,6 +122,16 @@ def main():
     if config.show_generated_table and not config.hide_windows:
         table_renderer = GeneratedTableRenderer(config.generated_table_size)
 
+    # Trajectory prediction
+    trajectory_predictor = None
+    cue_detector = None
+    trajectory_renderer = None
+    if config.show_trajectory:
+        tw, th = config.output_dimensions
+        trajectory_predictor = TrajectoryPredictor(tw, th)
+        cue_detector = CueDetector()
+        trajectory_renderer = TrajectoryRenderer()
+
     state_manager = StateManager()
     state_manager.initialize(config, state)
 
@@ -161,6 +173,38 @@ def main():
         )
         if not config.fast_mode:
             state_manager.update(detections)
+
+        # --- Trajectory prediction ---
+        if (
+            config.show_trajectory
+            and trajectory_predictor is not None
+            and detections
+            and not state_manager.shot_active
+        ):
+            white_pos = None
+            other_balls = []
+            for det in detections:
+                if det["label"] == "white":
+                    white_pos = det["center"]
+                elif det["label"] in detection_model.ball_class_names:
+                    cx, cy = det["center"]
+                    other_balls.append({"x": cx, "y": cy, "color": det["label"]})
+
+            if white_pos is not None:
+                aim = cue_detector.detect_aim(processed_frame, white_pos, detections)
+                if aim is not None:
+                    prediction = trajectory_predictor.predict(
+                        cue_pos=white_pos,
+                        aim_direction=aim,
+                        balls=other_balls,
+                    )
+                    if prediction is not None:
+                        if not config.hide_windows:
+                            trajectory_renderer.draw_on_frame(
+                                processed_frame, prediction)
+                        if config.trajectory_led and state_manager.led_controller:
+                            trajectory_renderer.send_to_leds(
+                                state_manager.led_controller, prediction)
 
         if (
             not config.fast_mode
