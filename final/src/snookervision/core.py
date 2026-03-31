@@ -105,7 +105,7 @@ def parse_args():
         "--arduino-port",
         type=str,
         default=None,
-        help="Optional Arduino serial port for the display controller, for example /dev/cu.usbmodem1101.",
+        help="Optional display controller target. Use a serial port like /dev/cu.usbmodem1101 or comma-separated HTTP endpoints like http://snooker-display-1.local,http://snooker-display-2.local.",
     )
 
     parser.add_argument(
