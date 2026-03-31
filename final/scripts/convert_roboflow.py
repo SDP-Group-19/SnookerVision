@@ -13,28 +13,28 @@ import os
 import random
 import shutil
 
-ZIP_PATH = "snooker_dataset_v5.zip"
+ZIP_PATH = "snooker_dataset_v6.zip"
 OUT_DIR = "final/scripts/dataset"
 
-# Roboflow v3 classes: 0=black 1=blue 2=brown 3=green 4=light 5=objects 6=pink 7=pocket 8=red 9=white 10=yellow
-# Model classes:       0=black-ball 1=blue-ball 2=brown-ball 3=green-ball 4=pink-ball 5=pocket 6=red-ball 7=white-ball 8=yellow-ball
+# Roboflow v6 classes: 0=black 1=blue 2=brown 3=green 4=light 5=objects 6=pink 7=pocket 8=red 9=white 10=yellow
+# best_best_color.pt:  0=red  1=white  2=yellow  3=green  4=blue  5=brown  6=pink  7=black
 REMAP = {
-    0: 0,   # black -> black-ball
-    1: 1,   # blue -> blue-ball
-    2: 2,   # brown -> brown-ball
-    3: 3,   # green -> green-ball
+    0: 7,   # black -> 7
+    1: 4,   # blue -> 4
+    2: 5,   # brown -> 5
+    3: 3,   # green -> 3
     # 4: light -> SKIP
     # 5: objects -> SKIP
-    6: 4,   # pink -> pink-ball
-    7: 5,   # pocket -> pocket
-    8: 6,   # red -> red-ball
-    9: 7,   # white -> white-ball
-    10: 8,  # yellow -> yellow-ball
+    6: 6,   # pink -> 6
+    # 7: pocket -> SKIP (best_best_color.pt has no pocket class)
+    8: 0,   # red -> 0
+    9: 1,   # white -> 1
+    10: 2,  # yellow -> 2
 }
 
 MODEL_NAMES = [
-    "black-ball", "blue-ball", "brown-ball", "green-ball",
-    "pink-ball", "pocket", "red-ball", "white-ball", "yellow-ball",
+    "red", "white", "yellow", "green",
+    "blue", "brown", "pink", "black",
 ]
 
 

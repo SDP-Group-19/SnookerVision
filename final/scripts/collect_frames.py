@@ -61,8 +61,6 @@ def main():
             break
         if key == ord(" "):
             save = True
-        if now - last_save >= args.interval:
-            save = True
 
         if save:
             path = os.path.join(args.out, f"frame_{count:04d}.jpg")
