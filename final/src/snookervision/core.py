@@ -101,6 +101,20 @@ def parse_args():
         default=False
     )
 
+    parser.add_argument(
+        "--arduino-port",
+        type=str,
+        default=None,
+        help="Optional Arduino serial port for the display controller, for example /dev/cu.usbmodem1101.",
+    )
+
+    parser.add_argument(
+        "--arduino-baud",
+        type=int,
+        default=115200,
+        help="Baud rate for the Arduino display controller. Default: 115200.",
+    )
+
     return parser.parse_args()
 
 

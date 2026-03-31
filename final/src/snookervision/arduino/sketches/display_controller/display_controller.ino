@@ -20,7 +20,7 @@ namespace {
 
 // Hardware map: change these pin numbers to match your wiring.
 constexpr uint8_t kDisplayCount = 2;
-constexpr uint8_t kMaxScore = 9999;
+constexpr int kMaxScore = 9999;
 constexpr unsigned long kDebounceDelayMs = 40;
 constexpr uint8_t kBrightness = 0x0f;
 constexpr uint8_t kRgbLedCount = 2;
@@ -532,7 +532,7 @@ void initializeDisplays() {
 
 void initializeLcd() {
   lcd.begin(kLcdColumns, kLcdRows);
-  lcd.setRGB(255, 255, 255);
+  lcd.setRGB(0, 255, 0);
   setLcdMessage("SnookerVision", "Controller ready");
 }
 

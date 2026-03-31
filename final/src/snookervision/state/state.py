@@ -2,6 +2,7 @@ import time
 import logging
 import math
 import numpy as np
+from snookervision.arduino.host.display_bridge import ArduinoDisplayBridge
 from snookervision.game_logic.game_logic import (
     BallType,
     Event,
@@ -31,11 +32,12 @@ class StateManager():
         self.shot_active = False
         self.shot_last_motion_time = None
         self.shot_stopped_at = None
-        self.first_hit_colour = None
-        self.second_hit_colour = None
+        self.first_object_hit_colour = None
         self.live_overlay_lines = []
         self.last_potted_text = "-"
+        self.last_ball_hit_text = "-"
         self.last_foul_text = "-"
+        self.show_foul_until = 0.0
         self.game_state = GameState()
         self.game_state.start_frame()
         self.rule_engine = RuleEngine(self.game_state)
@@ -45,6 +47,8 @@ class StateManager():
         self.no_reds_announced = False
         self.red_potted_ever = False
         self.zero_red_since = None
+        self.arduino = None
+        self.arduino_state = None
         self.pocket_names = [
             "top_left",
             "top_middle",
@@ -54,7 +58,7 @@ class StateManager():
             "bottom_right",
         ]
 
-    def initialize(self, config, state):
+    def initialize(self, config, state, arduino_port=None, arduino_baud=115200):
         """Initialize the StateManager with configuration and state objects"""
         self.config = config
         self.state = state
@@ -63,7 +67,11 @@ class StateManager():
             self.config.output_dimensions[0] - (2 * self.config.gantry_effective_range_x_px[0])))
         self.y_ratio = np.divide(self.config.output_dimensions[1], (
             self.config.output_dimensions[1] - (2 * self.config.gantry_effective_range_y_px[0])))
+        if arduino_port:
+            self.arduino = ArduinoDisplayBridge(arduino_port, arduino_baud)
+            self.arduino.connect()
         self._rebuild_overlay_lines()
+        self._sync_arduino_display(force=True)
 
     def update(self, detections, labels):
         if not self.config or not self.state:
@@ -93,6 +101,7 @@ class StateManager():
             self._feed_game_logic(balls, pot_notifications, current_time)
             self._notify_pots(pot_notifications)
             self._rebuild_overlay_lines()
+            self._sync_arduino_display()
             return
 
         for ball in detections[0].boxes:
@@ -129,6 +138,7 @@ class StateManager():
         self._feed_game_logic(balls, pot_notifications, current_time)
         self._notify_pots(pot_notifications)
         self._rebuild_overlay_lines()
+        self._sync_arduino_display()
 
         self._update_and_send_balls(balls, corrected_white_ball, current_time)
 
@@ -371,9 +381,13 @@ class StateManager():
             logger.info(f"[GAME] {msg}")
             if msg.startswith("FOUL"):
                 self.last_foul_text = msg
+                self.show_foul_until = time.time() + 2.5
+            if msg.startswith("FIRST_CONTACT"):
+                self.last_ball_hit_text = msg.replace("FIRST_CONTACT", "").strip()
             self.overlay_notifications.append(
                 {"text": f"Game: {msg}", "ttl": ttl}
             )
+        self._sync_arduino_display(force=True, latest_outputs=outputs)
 
     def _feed_game_logic(self, balls, pot_notifications, now):
         if any((n.get("colour") or "").lower() == "red" for n in pot_notifications):
@@ -401,15 +415,10 @@ class StateManager():
             self.game_shot_open = False
             self.first_contact_sent_this_shot = False
 
-        # First contact: cue -> first non-white hit colour.
+        # First contact: always assume the cue ball is first and only detect
+        # the first non-white ball as the object ball.
         if self.game_shot_open and self.shot_active and not self.first_contact_sent_this_shot:
-            hit_colour = None
-            if self.first_hit_colour and self.first_hit_colour.lower() != "white":
-                hit_colour = self.first_hit_colour
-            elif self.second_hit_colour:
-                hit_colour = self.second_hit_colour
-
-            hit_ball = self._colour_to_ball_type(hit_colour)
+            hit_ball = self._colour_to_ball_type(self.first_object_hit_colour)
             if hit_ball is not None and hit_ball != BallType.CUE:
                 outputs = self.rule_engine.on_event(
                     Event(
@@ -486,19 +495,18 @@ class StateManager():
             self.shot_active = True
             self.shot_last_motion_time = now
             self.shot_stopped_at = None
-            self.first_hit_colour = None
-            self.second_hit_colour = None
+            self.first_object_hit_colour = None
 
         if self.shot_active:
             if any_moving:
                 self.shot_last_motion_time = now
 
             for colour in moving_colours:
-                if self.first_hit_colour is None:
-                    self.first_hit_colour = colour
+                if colour == "white":
                     continue
-                if self.second_hit_colour is None and colour != self.first_hit_colour:
-                    self.second_hit_colour = colour
+                if self.first_object_hit_colour is None:
+                    self.first_object_hit_colour = colour
+                    break
 
             if self.shot_last_motion_time is not None and (now - self.shot_last_motion_time) >= reset_seconds:
                 self.shot_active = False
@@ -527,6 +535,7 @@ class StateManager():
 
         self.live_overlay_lines = [
             "[SHOT]",
+            f"Ball hit: {self.last_ball_hit_text}",
             f"Ball potted: {self.last_potted_text}",
             "[FOUL]",
             f"Last foul: {self.last_foul_text}",
@@ -536,6 +545,81 @@ class StateManager():
             f"Turn: {turn_name}",
             f"Target: {target_name}",
         ]
+
+    def _sanitize_lcd_text(self, text, limit=16):
+        safe = (text or "").replace("|", "/").replace("\n", " ").replace("\r", " ").strip()
+        if len(safe) > limit:
+            return safe[:limit]
+        return safe
+
+    def _active_player_index(self):
+        frame = self.game_state.current_frame
+        if frame is None:
+            return 2
+        return 2 if frame.activePlayer is self.game_state.player1 else 1
+
+    def _format_target_name(self, target):
+        if not target:
+            return "-"
+        if target == "COLOUR":
+            return "Colour"
+        return target.capitalize()
+
+    def _build_lcd_lines(self, latest_outputs=None):
+        frame = self.game_state.current_frame
+        if frame is None:
+            return "SnookerVision", "No frame"
+
+        if time.time() < self.show_foul_until:
+            return self._sanitize_lcd_text("Foul!!!"), self._sanitize_lcd_text("")
+
+        player_label = "Player 1" if frame.activePlayer is self.game_state.player1 else "Player 2"
+        target_label = f"Target: {self._format_target_name(frame.activePlayer.target)}"
+        return self._sanitize_lcd_text(player_label), self._sanitize_lcd_text(target_label)
+
+    def _sync_arduino_display(self, force=False, latest_outputs=None):
+        if self.arduino is None or not self.arduino.is_available:
+            return
+
+        frame = self.game_state.current_frame
+        score1 = self.game_state.player1.score
+        score2 = self.game_state.player2.score
+        active_player = self._active_player_index()
+        lcd_line1, lcd_line2 = self._build_lcd_lines(latest_outputs=latest_outputs)
+
+        next_state = {
+            "score1": score1,
+            "score2": score2,
+            "active_player": active_player,
+            "lcd_line1": lcd_line1,
+            "lcd_line2": lcd_line2,
+        }
+
+        if not force and next_state == self.arduino_state:
+            return
+
+        if force or self.arduino_state is None or self.arduino_state["score1"] != score1:
+            self.arduino.send_command(f"SET 1 {score1}")
+        if force or self.arduino_state is None or self.arduino_state["score2"] != score2:
+            self.arduino.send_command(f"SET 2 {score2}")
+
+        if force or self.arduino_state is None or self.arduino_state["active_player"] != active_player:
+            self.arduino.send_command("LIGHTOFF")
+            self.arduino.send_command(f"LIGHT {active_player} 40 40 40")
+
+        if (
+            force
+            or self.arduino_state is None
+            or self.arduino_state["lcd_line1"] != lcd_line1
+            or self.arduino_state["lcd_line2"] != lcd_line2
+        ):
+            self.arduino.send_command(f"LCD {lcd_line1}|{lcd_line2}")
+
+        self.arduino_state = next_state
+
+    def shutdown(self):
+        if self.arduino is not None:
+            self.arduino.close()
 
     def _advance_overlay_notifications(self):
         updated = []

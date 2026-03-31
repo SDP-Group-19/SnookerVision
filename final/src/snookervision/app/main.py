@@ -124,7 +124,12 @@ def main():
     show_live_view = not args.overlay_only
 
     state_manager = StateManager()
-    state_manager.initialize(config, state)
+    state_manager.initialize(
+        config,
+        state,
+        arduino_port=args.arduino_port,
+        arduino_baud=args.arduino_baud,
+    )
 
     if show_live_view:
         # Create resizable window for fullscreen capability
@@ -136,9 +141,6 @@ def main():
     fps_log_interval = 2.0  # seconds
 
     while True:
-
-        for _ in range(3):
-            camera.read()
 
         ret, frame = camera.read()
         if not ret or frame is None:
@@ -215,6 +217,7 @@ def main():
 
     camera.release()
     cv2.destroyAllWindows()
+    state_manager.shutdown()
     if config.use_networking:
         state.network.disconnect()
 
