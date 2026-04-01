@@ -104,6 +104,58 @@ class ArduinoDisplayBridge:
         logger.info("[ARDUINO] %s", payload)
         return True
 
+    def poll_events(self) -> list[str]:
+        if not self.http_endpoints:
+            return self._poll_serial_events()
+
+        events: list[str] = []
+        for endpoint in self.http_endpoints:
+            try:
+                with request.urlopen(f"{endpoint}/events", timeout=0.5) as response:
+                    body = response.read().decode("utf-8", errors="replace")
+            except (error.URLError, TimeoutError, ValueError):
+                continue
+
+            for line in body.splitlines():
+                event = line.strip()
+                if event:
+                    events.append(event)
+
+        return events
+
+    def _poll_serial_events(self) -> list[str]:
+        if self.connection is None:
+            return []
+
+        events: list[str] = []
+        try:
+            while self.connection.in_waiting > 0:
+                raw_line = self.connection.readline()
+                if not raw_line:
+                    break
+
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+
+                logger.info("[ARDUINO RX] %s", line)
+                normalized = self._normalize_event_line(line)
+                if normalized:
+                    events.append(normalized)
+        except SerialException as exc:
+            logger.warning("Arduino read failed while polling events: %s", exc)
+            self.close()
+
+        return events
+
+    def _normalize_event_line(self, line: str) -> str | None:
+        normalized = line.strip().upper()
+        if normalized == "BUTTON LAST_POSITION":
+            return "LAST_POSITION"
+        if normalized.startswith("BUTTON "):
+            return normalized[len("BUTTON "):]
+        return None
+
     def _send_http_command(self, command: str) -> bool:
         payload = command.strip()
         if not payload or not self.http_endpoints:
