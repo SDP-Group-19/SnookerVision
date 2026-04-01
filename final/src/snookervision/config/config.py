@@ -60,7 +60,7 @@ class Config:
         self.pot_pocket_radius_px = 45
         self.non_red_pot_cooldown_seconds = 3.0
         self.no_reds_confirm_seconds = 1.0
-        self.hit_motion_threshold_px = 10
+        self.hit_motion_threshold_px = 18
         self.hit_stationary_reset_seconds = 2.0
         self.pot_overlay_ttl_frames = 60
         self.hide_windows = False
@@ -83,7 +83,7 @@ class Config:
         self.pocket_sensor_topic = "pockets/esp"
         self.pot_trigger_window = 5.0  # seconds: how long a trigger stays valid
         # LED strip settings (ESP32 via TCP)
-        self.led_enabled = False
+        self.led_enabled = True
         self.led_arduino_ip = "192.168.4.1"
         self.led_arduino_port = 5000
         self.led_foul_flash_seconds = 3.0

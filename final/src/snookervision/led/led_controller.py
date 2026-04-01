@@ -1,84 +1,104 @@
-import socket
+import ssl
 import logging
 import threading
 
 logger = logging.getLogger(__name__)
 
-# TCP protocol for ESP32 LED master:
-#   Connect → send "CTRL\n" to identify as controller
-#   "ball: x,y,r,g,b\n"   - light LEDs nearest to table position (x,y)
-#   "resize: w,h\n"        - set table dimensions for coordinate scaling
-#   "clear\n"              - turn off all LEDs
+# MQTT protocol for ESP32 LED master (topic: "esp32/master"):
+#   "ball: x,y,r,g,b"   - light LEDs nearest to table position (x,y)
+#   "resize: w,h"        - set LED coordinate range (w = x-axis, h = y-axis)
+#   "clear"              - turn off all LEDs
+#
+# LED coordinate system: (0,0) = bottom-right of table
+#   led_x increases leftward  (= table_width - CV x)
+#   led_y increases upward    (= table_height - CV y)
 
 
 class LEDController:
-    def __init__(self, arduino_ip, arduino_port):
-        self.arduino_ip = arduino_ip
-        self.arduino_port = arduino_port
-        self._sock = None
+    def __init__(self, broker, port, username, password, topic="esp32/master"):
+        self.broker = broker
+        self.port = port
+        self.username = username
+        self.password = password
+        self.topic = topic
+        self._client = None
         self._lock = threading.Lock()
         self.table_width = 1200
         self.table_height = 600
 
     def connect(self):
+        try:
+            import paho.mqtt.client as mqtt
+        except ImportError:
+            logger.warning("paho-mqtt not installed — LED controller disabled")
+            return False
+
+        try:
+            client = mqtt.Client(client_id="LEDController", protocol=mqtt.MQTTv311)
+            client.username_pw_set(self.username, self.password)
+            client.tls_set(cert_reqs=ssl.CERT_NONE)
+            client.tls_insecure_set(True)
+            client.connect(self.broker, self.port)
+            client.loop_start()
+            self._client = client
+            logger.info(f"LED controller connected via MQTT — topic: {self.topic}")
+            return True
+        except Exception as e:
+            logger.error(f"LED MQTT connection failed: {e}")
+            self._client = None
+            return False
+
+    def _publish(self, message):
         with self._lock:
-            if self._sock is not None:
-                return True
+            if self._client is None:
+                return False
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(5.0)
-                sock.connect((self.arduino_ip, self.arduino_port))
-                sock.sendall(b"CTRL\n")
-                sock.settimeout(None)
-                self._sock = sock
-                logger.info(f"LED connected to {self.arduino_ip}:{self.arduino_port} (CTRL)")
+                self._client.publish(self.topic, message)
                 return True
-            except OSError as e:
-                logger.error(f"LED connection failed: {e}")
-                self._sock = None
+            except Exception as e:
+                logger.warning(f"LED publish failed: {e}")
                 return False
 
-    def _send(self, message):
-        with self._lock:
-            if self._sock is None:
-                return False
-            try:
-                self._sock.sendall(message.encode("ascii"))
-                return True
-            except OSError as e:
-                logger.warning(f"LED send failed: {e}")
-                try:
-                    self._sock.close()
-                except OSError:
-                    pass
-                self._sock = None
-                return False
+    def _cv_to_led(self, cv_x, cv_y):
+        """Convert CV coordinates to LED coordinates.
+
+        LED: (0,0) = bottom-right, x left, y up.
+        CV:  (0,0) = top-left,     x right, y down.
+        """
+        led_x = self.table_width - cv_x
+        led_y = self.table_height - cv_y
+        return led_x, led_y
 
     def send_ball(self, x, y, r, g, b):
-        self._send(f"ball: {x},{y},{r},{g},{b}\n")
+        led_x, led_y = self._cv_to_led(x, y)
+        self._publish(f"ball: {led_x},{led_y},{r},{g},{b}")
 
     def send_resize(self, width, height):
         self.table_width = width
         self.table_height = height
-        self._send(f"resize: {width},{height}\n")
+        self._publish(f"resize: {width},{height}")
 
     def send_foul(self):
         """Light up red LEDs along both long sides of the table to indicate FOUL."""
         w = self.table_width
         h = self.table_height
         step = 50
-        for x in range(0, w + 1, step):
-            self._send(f"ball: {x},0,255,0,0\n")
-            self._send(f"ball: {x},{h},255,0,0\n")
+        # Long sides of the table (top edge y=0, bottom edge y=h in CV)
+        for cv_x in range(0, w + 1, step):
+            lx0, ly0 = self._cv_to_led(cv_x, 0)
+            lx1, ly1 = self._cv_to_led(cv_x, h)
+            self._publish(f"ball: {lx0},{ly0},255,0,0")
+            self._publish(f"ball: {lx1},{ly1},255,0,0")
 
     def send_clear(self):
-        self._send("clear\n")
+        self._publish("clear")
 
     def close(self):
         with self._lock:
-            if self._sock is not None:
+            if self._client is not None:
                 try:
-                    self._sock.close()
-                except OSError:
+                    self._client.loop_stop()
+                    self._client.disconnect()
+                except Exception:
                     pass
-                self._sock = None
+                self._client = None

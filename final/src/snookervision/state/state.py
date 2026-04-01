@@ -117,14 +117,11 @@ class StateManager():
         if arduino_port:
             self.arduino = ArduinoDisplayBridge(arduino_port, arduino_baud)
             self.arduino.connect()
-        if getattr(config, "pocket_sensor_enabled", False):
-            self.pocket_sensor = PocketSensor(config)
-            if not self.pocket_sensor.connect():
-                self.pocket_sensor = None
         if config.led_enabled:
             from snookervision.led import LEDController
             self.led_controller = LEDController(
-                config.led_arduino_ip, config.led_arduino_port
+                config.mqtt_broker, config.mqtt_port,
+                config.mqtt_username, config.mqtt_password,
             )
             if self.led_controller.connect():
                 self.led_controller.send_resize(
@@ -1140,7 +1137,7 @@ class StateManager():
         white_moving = "white" in moving_colours
         any_moving = len(moving_colours) > 0
 
-        if not self.shot_active and any_moving:
+        if not self.shot_active and white_moving:
             self.shot_active = True
             self.shot_last_motion_time = now
             self.shot_stopped_at = None
