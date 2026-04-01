@@ -61,7 +61,7 @@ class Config:
         self.non_red_pot_cooldown_seconds = 3.0
         self.no_reds_confirm_seconds = 1.0
         self.hit_motion_threshold_px = 10
-        self.hit_stationary_reset_seconds = 1.0
+        self.hit_stationary_reset_seconds = 2.0
         self.pot_overlay_ttl_frames = 60
         self.hide_windows = False
         self.use_calibration = False
@@ -74,6 +74,14 @@ class Config:
         self.pocket_pts_path = "final/src/snookervision/data/pocket_pts.json"
         self.pocket_pts = None
         self.pocket_filter_radius_px = 30
+        # Pocket sensor (MQTT hardware triggers)
+        self.pocket_sensor_enabled = True
+        self.mqtt_broker = "d35b0b7f3a0e43aeaa83cbe44fe9e73b.s1.eu.hivemq.cloud"
+        self.mqtt_port = 8883
+        self.mqtt_username = "SDPgroup19"
+        self.mqtt_password = "SDPgroup543"
+        self.pocket_sensor_topic = "pockets/esp"
+        self.pot_trigger_window = 5.0  # seconds: how long a trigger stays valid
         # LED strip settings (ESP32 via TCP)
         self.led_enabled = False
         self.led_arduino_ip = "192.168.4.1"

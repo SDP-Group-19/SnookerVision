@@ -480,8 +480,16 @@ class RuleEngine:
                 fs.tempBallOrder = BALL_ORDER.copy()
                 fs.ball_on = fs.tempBallOrder[0]  # "YELLOW"
             else:
-                # Otherwise ball on stays unchanged after a foul.
-                fs.ball_on = target
+                # Revert to RED if we were on COLOUR during reds stage
+                if not fs.reds_gone and target == "COLOUR":
+                    fs.ball_on = "RED"
+                # Final colour after last red missed/fouled → start clearance at YELLOW
+                elif fs.reds_gone and fs.final_colour_pending and target == "COLOUR":
+                    fs.final_colour_pending = False
+                    fs.tempBallOrder = BALL_ORDER.copy()
+                    fs.ball_on = fs.tempBallOrder[0]  # "YELLOW"
+                else:
+                    fs.ball_on = target
 
             fs._sync_targets()
             fs.swap_players()
@@ -513,7 +521,16 @@ class RuleEngine:
         # ------------------------------------------------------------
         if gained == 0:
             out.append(f"NO_POT: turn -> {fs.opponent.name}")
-            fs.ball_on = target
+            # Revert to RED if we were on COLOUR during reds stage
+            if not fs.reds_gone and target == "COLOUR":
+                fs.ball_on = "RED"
+            # Final colour after last red missed → start clearance at YELLOW
+            elif fs.reds_gone and fs.final_colour_pending and target == "COLOUR":
+                fs.final_colour_pending = False
+                fs.tempBallOrder = BALL_ORDER.copy()
+                fs.ball_on = fs.tempBallOrder[0]  # "YELLOW"
+            else:
+                fs.ball_on = target
             fs._sync_targets()
             fs.swap_players()
             return out

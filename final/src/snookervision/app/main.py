@@ -187,9 +187,11 @@ def main():
         if not ret or frame is None:
             if args.file is not None:
                 logger.info("Video finished.")
-            else:
-                logger.error("Failed to read from camera.")
-            break
+                break
+            # Network streams can drop frames; retry instead of exiting
+            logger.warning("Failed to read frame, retrying...")
+            time.sleep(0.05)
+            continue
 
         processed_frame = frame
 

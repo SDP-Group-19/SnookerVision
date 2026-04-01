@@ -4,6 +4,7 @@ import math
 import numpy as np
 from snookervision.arduino.host.display_bridge import ArduinoDisplayBridge
 from snookervision.foul_logic import build_reposition_queue, snapshot_positions
+from snookervision.state.pocket_sensor import PocketSensor
 from snookervision.game_logic.game_logic import (
     BallType,
     Event,
@@ -59,6 +60,7 @@ class StateManager():
         self.shot_stopped_at = None
         self.first_object_hit_colour = None
         self.second_object_hit_colour = None
+        self.shot_moved_colours = set()  # all colours that moved during current shot
         self.live_overlay_lines = []
         self.last_potted_text = "-"
         self.last_ball_hit_text = "-"
@@ -96,6 +98,9 @@ class StateManager():
         self.foul_flash_active = False
         self.foul_flash_start = None
         self.foul_potted_colors = set()
+        # Pocket sensor (hardware trigger confirmation)
+        self.pocket_sensor = None
+        self.trigger_pot_events = []  # pot events confirmed by hardware trigger
 
     def initialize(self, config, state, arduino_port=None, arduino_baud=115200):
         """Initialize the StateManager with configuration and state objects"""
@@ -118,8 +123,103 @@ class StateManager():
                 self.led_controller.send_resize(
                     config.output_dimensions[0], config.output_dimensions[1]
                 )
+        if getattr(config, "pocket_sensor_enabled", False):
+            self.pocket_sensor = PocketSensor(config)
+            if self.pocket_sensor.connect():
+                logger.info("Pocket sensor connected — pots require hardware trigger confirmation")
+            else:
+                logger.warning("Pocket sensor connection failed — falling back to CV-only pot detection")
+                self.pocket_sensor = None
         self._rebuild_overlay_lines()
         self._sync_arduino_display(force=True)
+
+    def _drain_pocket_triggers(self, now):
+        """Drain MQTT events. Trigger fired = ball potted. Find which hit ball disappeared."""
+        if self.pocket_sensor is None:
+            return
+        for event in self.pocket_sensor.drain_events():
+            if event["state"] != "active":
+                continue
+            pocket_idx = event["pocket_idx"]
+            pocket_name = self.pocket_names[pocket_idx] if pocket_idx < len(self.pocket_names) else str(pocket_idx)
+            logger.info(f"[TRIGGER] Pocket {pocket_idx + 1} ({pocket_name}) sensor fired")
+
+            pocket_center = self._pocket_centers()[pocket_idx]
+
+            # Priority 1: ball that was HIT (moved this shot) and is now MISSING
+            best_hit_missing_id = None
+            best_hit_missing_dist = float("inf")
+            # Priority 2: any ball that is MISSING near this pocket
+            best_missing_id = None
+            best_missing_dist = float("inf")
+            # Priority 3: any non-potted track nearest to pocket (last resort)
+            best_any_id = None
+            best_any_dist = float("inf")
+
+            for track_id, track in self.ball_tracks.items():
+                if track["potted"] or track["colour"] == "white":
+                    continue
+                d = self._distance(track, pocket_center)
+                is_missing = track["missing_since"] is not None
+                was_hit = track["colour"] in self.shot_moved_colours
+
+                if was_hit and is_missing and d < best_hit_missing_dist:
+                    best_hit_missing_dist = d
+                    best_hit_missing_id = track_id
+
+                if is_missing and d < best_missing_dist:
+                    best_missing_dist = d
+                    best_missing_id = track_id
+
+                if d < best_any_dist:
+                    best_any_dist = d
+                    best_any_id = track_id
+
+            # Pick best candidate by priority
+            if best_hit_missing_id is not None:
+                chosen_id, chosen_dist, source = best_hit_missing_id, best_hit_missing_dist, "hit+missing"
+            elif best_missing_id is not None:
+                chosen_id, chosen_dist, source = best_missing_id, best_missing_dist, "missing"
+            elif best_any_id is not None:
+                chosen_id, chosen_dist, source = best_any_id, best_any_dist, "closest"
+            else:
+                chosen_id = None
+
+            if chosen_id is not None:
+                track = self.ball_tracks[chosen_id]
+                colour = track["colour"]
+
+                # Cooldown check
+                allow_emit = True
+                non_red_cooldown = max(
+                    0.2, float(getattr(self.config, "non_red_pot_cooldown_seconds", 3.0))
+                )
+                for recent in self.recent_non_red_pots:
+                    if recent["colour"] == colour and recent["pocket"] == pocket_name:
+                        if now - recent["time"] <= non_red_cooldown:
+                            allow_emit = False
+                            break
+
+                if allow_emit:
+                    self.pot_counter += 1
+                    self.trigger_pot_events.append({
+                        "order": self.pot_counter,
+                        "track_id": track["id"],
+                        "colour": colour,
+                        "pocket": pocket_name,
+                        "missing_seconds": 0.0,
+                    })
+                    self.recent_non_red_pots.append(
+                        {"colour": colour, "pocket": pocket_name, "time": now}
+                    )
+                track["potted"] = True
+                track["potted_at"] = now
+                logger.info(
+                    f"[POT] {colour.upper()} potted at {pocket_name} "
+                    f"(trigger, {source}, dist={chosen_dist:.0f}px)"
+                )
+            else:
+                logger.warning(f"[TRIGGER] Pocket {pocket_idx + 1} ({pocket_name}) fired but no ball track found")
 
     def update(self, detections, labels=None):
         if not self.config or not self.state:
@@ -133,6 +233,7 @@ class StateManager():
 
         current_time = time.time()
         self.tracking_tick += 1
+        self._drain_pocket_triggers(current_time)
         self._advance_overlay_notifications()
 
         if current_time - self.time_since_last_update < self.config.network_update_interval:
@@ -147,6 +248,8 @@ class StateManager():
             self.current_balls_snapshot = {}
             self._update_hit_order({}, current_time)
             pot_notifications = self._update_tracks_and_detect_pots(balls, current_time)
+            pot_notifications.extend(self.trigger_pot_events)
+            self.trigger_pot_events.clear()
             self._feed_game_logic(balls, pot_notifications, current_time)
             self._notify_pots(pot_notifications)
             self._poll_display_events()
@@ -185,6 +288,8 @@ class StateManager():
 
         self._update_hit_order(balls, current_time)
         pot_notifications = self._update_tracks_and_detect_pots(balls, current_time)
+        pot_notifications.extend(self.trigger_pot_events)
+        self.trigger_pot_events.clear()
         self._feed_game_logic(balls, pot_notifications, current_time)
         self._notify_pots(pot_notifications)
         self.current_balls_snapshot = snapshot_positions(balls)
@@ -343,7 +448,13 @@ class StateManager():
             if track["missing_since"] is not None and track["pocket_idx"] is not None:
                 missing_duration = now - track["missing_since"]
                 if missing_duration >= missing_seconds:
-                    pocket_name = self.pocket_names[track["pocket_idx"]]
+                    # When pocket sensor is active, pots are only confirmed by trigger
+                    # (handled in _drain_pocket_triggers). CV-only fallback when no sensor.
+                    if self.pocket_sensor is not None:
+                        continue
+
+                    pocket_idx = track["pocket_idx"]
+                    pocket_name = self.pocket_names[pocket_idx]
                     allow_emit = True
                     for recent in self.recent_non_red_pots:
                         if recent["colour"] != track["colour"]:
@@ -764,6 +875,7 @@ class StateManager():
         self.shot_stopped_at = None
         self.first_object_hit_colour = None
         self.second_object_hit_colour = None
+        self.shot_moved_colours = set()
         self.last_potted_text = "-"
         self.last_ball_hit_text = "-"
         self.last_foul_text = "-"
@@ -866,8 +978,13 @@ class StateManager():
             return False
         curr_positions = balls.get(colour, [])
         prev_positions = self.previous_state.get(colour, [])
-        if not curr_positions or not prev_positions:
+        if not prev_positions:
             return False
+        # Ball disappeared — don't treat as "stopped"; it might be occluded or entering pocket
+        if not curr_positions:
+            # If this colour was already moving this shot, keep it as "moving"
+            # so the shot doesn't end prematurely due to occlusion
+            return colour in self.shot_moved_colours
 
         for curr in curr_positions:
             nearest = min(
@@ -898,12 +1015,14 @@ class StateManager():
             self.shot_stopped_at = None
             self.first_object_hit_colour = None
             self.second_object_hit_colour = None
+            self.shot_moved_colours = set()
 
         if self.shot_active:
             if any_moving:
                 self.shot_last_motion_time = now
 
             for colour in moving_colours:
+                self.shot_moved_colours.add(colour)
                 if colour == "white":
                     continue
                 if self.first_object_hit_colour is None:
@@ -968,8 +1087,8 @@ class StateManager():
     def _active_player_index(self):
         frame = self.game_state.current_frame
         if frame is None:
-            return 2
-        return 2 if frame.activePlayer is self.game_state.player1 else 1
+            return 1
+        return 1 if frame.activePlayer is self.game_state.player1 else 2
 
     def _format_target_name(self, target):
         if not target:
@@ -1039,6 +1158,8 @@ class StateManager():
     def shutdown(self):
         if self.arduino is not None:
             self.arduino.close()
+        if self.pocket_sensor is not None:
+            self.pocket_sensor.close()
 
     def _advance_overlay_notifications(self):
         updated = []
