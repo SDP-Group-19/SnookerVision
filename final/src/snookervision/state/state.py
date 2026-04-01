@@ -119,14 +119,24 @@ class StateManager():
             self.arduino.connect()
         if config.led_enabled:
             from snookervision.led import LEDController
+            from snookervision.led.led_controller import compute_table_dimensions
             self.led_controller = LEDController(
                 config.mqtt_broker, config.mqtt_port,
                 config.mqtt_username, config.mqtt_password,
             )
             if self.led_controller.connect():
-                self.led_controller.send_resize(
-                    config.output_dimensions[0], config.output_dimensions[1]
-                )
+                cv_w, cv_h = config.output_dimensions
+                # Compute LED table dimensions from table_pts if available
+                if config.pocket_pts is not None:
+                    from snookervision.processing.camera_processing import load_table_pts
+                    table_pts = load_table_pts()
+                    if table_pts is not None:
+                        led_w, led_h = compute_table_dimensions(table_pts.tolist())
+                    else:
+                        led_w, led_h = cv_w, cv_h
+                else:
+                    led_w, led_h = cv_w, cv_h
+                self.led_controller.send_resize(led_w, led_h, cv_w, cv_h)
         if getattr(config, "pocket_sensor_enabled", False):
             self.pocket_sensor = PocketSensor(config)
             if self.pocket_sensor.connect():
