@@ -11,10 +11,45 @@ from snookervision.core import config
 logger = logging.getLogger(__name__)
 
 
+def resolve_torch_device():
+    requested = getattr(config, "detector_device", "auto")
+    if requested != "auto":
+        if requested == "cuda" and not torch.cuda.is_available():
+            logger.warning("CUDA requested but unavailable, falling back to CPU.")
+            return "cpu"
+        if requested == "mps":
+            mps_backend = getattr(torch.backends, "mps", None)
+            if mps_backend is None or not mps_backend.is_available():
+                mps_built = mps_backend is not None and mps_backend.is_built()
+                logger.warning(
+                    "MPS requested but unavailable, falling back to CPU. "
+                    f"mps_built={mps_built}"
+                )
+                return "cpu"
+        return requested
+
+    if torch.cuda.is_available():
+        logger.info("Auto-selected CUDA for detection.")
+        return "cuda"
+
+    mps_backend = getattr(torch.backends, "mps", None)
+    if mps_backend is not None and mps_backend.is_available():
+        logger.info("Auto-selected MPS for detection.")
+        return "mps"
+
+    logger.info("No GPU backend available, using CPU for detection.")
+    return "cpu"
+
+
 class DetectionModel:
     def __init__(self):
+        self.device = resolve_torch_device()
+        if self.device == "cuda":
+            torch.backends.cudnn.benchmark = True
         self.model = self.load_model()
-        self.labels = self.model.names
+        self.labels = self._normalize_labels(
+            self.model.names if self.model is not None else {}
+        )
         self.total_objects = 0
         self.total_balls = 0
         self.hole_positions = [
@@ -32,15 +67,45 @@ class DetectionModel:
             "white", "black", "red", "yellow", "green", "brown", "blue", "pink"
         }
 
+    def _normalize_labels(self, names):
+        """Normalize model class names so the rest of the codebase works.
+
+        Handles models that use 'black-ball' style names by stripping '-ball',
+        and maps 'pocket' to 'hole' for compatibility.
+        """
+        normalized = {}
+        for idx, name in names.items():
+            n = name.lower().replace("-ball", "").replace("_ball", "")
+            if n == "pocket":
+                n = "hole"
+            normalized[idx] = n
+        return normalized
+
+    def _label_to_bbox_color(self, classname):
+        """Map a normalized class name to a bbox color."""
+        color_map = {
+            "red": (0, 0, 255),
+            "white": (255, 255, 255),
+            "yellow": (0, 255, 255),
+            "green": (0, 255, 0),
+            "blue": (255, 0, 0),
+            "brown": (42, 42, 165),
+            "pink": (203, 192, 255),
+            "black": (0, 0, 0),
+            "hole": (128, 128, 128),
+            "arm": (0, 165, 255),
+        }
+        return color_map.get(classname, (255, 255, 255))
+
     def load_model(self):
         if not os.path.exists(config.detection_model_path):
             logger.error(
                 f"Model file not found at {config.detection_model_path}.")
             return None
         else:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
             model = YOLO(config.detection_model_path, task="detect")
-            model.to(device)
+            model.to(self.device)
+            logger.info(f"Detection model running on device: {self.device}")
             return model
 
     # Can have as a trigger function to change the model during runtime. Not used yet, waiting for liveconfig to be updated.
@@ -61,39 +126,51 @@ class DetectionModel:
         if self.frame_count % config.process_every_n_frames != 0:
             return self.last_result, self.labels
 
-        # Detect available device and optimize based on hardware
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        use_half = self.device == "cuda"
 
-        # Adjust settings based on device
-        # For CPU: don't use half precision, lower batch size
-        use_half = device == "cuda"
+        with torch.inference_mode():
+            results = self.model.predict(
+                source=frame,
+                verbose=False,
+                conf=config.conf_threshold,
+                iou=0.40,
+                device=self.device,
+                half=use_half,
+                imgsz=config.detector_imgsz,
+                stream=False,
+            )
 
-
-        results = self.model(
-            frame,
-            verbose=False,
-            conf=config.conf_threshold,
-            iou=0.40,
-            device=device,
-            half=use_half,
-            stream=True
-        )
-
-        result = next(results, None)
+        result = results[0] if results else None
         if result is None or result.boxes is None:
             return None, None
 
-        all_results = [
-            (r, self.labels[int(r.cls.item())])
-            for r in result.boxes]
-
-        all_results.sort(key=lambda x: x[0].conf.item(), reverse=True)
-
-        filtered_results = self._filter_results(all_results)
-
-        result.boxes = filtered_results
-        self.last_result = (result, )
+        parsed_results = self._parse_result_boxes(result)
+        parsed_results.sort(key=lambda item: item["conf"], reverse=True)
+        filtered_results = self._filter_results(parsed_results)
+        self.last_result = filtered_results
         return self.last_result, self.labels
+
+    def _parse_result_boxes(self, result):
+        boxes = result.boxes
+        xyxy = boxes.xyxy.detach().to("cpu").numpy().astype(int)
+        class_indices = boxes.cls.detach().to("cpu").numpy().astype(int)
+        confidences = boxes.conf.detach().to("cpu").numpy()
+
+        parsed = []
+        for bbox, classidx, conf in zip(xyxy, class_indices, confidences):
+            xmin, ymin, xmax, ymax = bbox.tolist()
+            classname = self.labels[classidx]
+            parsed.append(
+                {
+                    "classidx": classidx,
+                    "label": classname,
+                    "color": self._label_to_bbox_color(classname),
+                    "bbox": (xmin, ymin, xmax, ymax),
+                    "center": ((xmin + xmax) // 2, (ymin + ymax) // 2),
+                    "conf": float(conf),
+                }
+            )
+        return parsed
 
     def _filter_results(self, all_results):
         filtered_results = []
@@ -113,8 +190,9 @@ class DetectionModel:
             "hole": 6,
             "arm": 3}
 
-        for result, classname in all_results:
-            _, _, xmin, ymin, xmax, ymax = self._get_result_info(result)
+        for result in all_results:
+            classname = result["label"]
+            xmin, ymin, xmax, ymax = result["bbox"]
             area = (xmax - xmin) * (ymax - ymin)
 
             if classname in class_limits \
@@ -139,14 +217,20 @@ class DetectionModel:
         return filtered_results
 
     def _is_likely_ball(self, area):
+        if config.fast_mode or not config.use_table_pts:
+            return area > 0
         return area > config.ball_area_range[0] \
             and area < config.ball_area_range[1]
 
     def _is_likely_arm(self, area):
+        if config.fast_mode or not config.use_table_pts:
+            return area > 0
         return area > config.arm_area_range[0] \
             and area < config.arm_area_range[1]
 
     def _is_likely_hole(self, xmin, ymin, xmax, ymax):
+        if config.fast_mode or not config.use_table_pts:
+            return True
         middlex = int((xmin + xmax) / 2)
         middley = int((ymin + ymax) / 2)
 
@@ -170,14 +254,6 @@ class DetectionModel:
                 return True
         return False
 
-    def _get_result_info(self, result):
-        xyxy = result.xyxy.cpu().numpy().squeeze().astype(int)
-        classidx = int(result.cls.item())
-        classname = self.labels[classidx]
-        color = config.bbox_colors[classidx % len(config.bbox_colors)]
-
-        return classname, color, xyxy[0], xyxy[1], xyxy[2], xyxy[3]
-
     def _sample_ball_color(self, frame, center_x, center_y, radius):
         mask = np.zeros(frame.shape[:2], dtype=np.uint8)
         cv2.circle(mask, (center_x, center_y), radius, 255, -1)
@@ -186,18 +262,18 @@ class DetectionModel:
 
     def get_ball_markers(self, frame, filtered_results):
         markers = []
-        if not filtered_results or filtered_results[0].boxes is None:
+        if not filtered_results:
             return markers
 
         frame_height, frame_width = frame.shape[:2]
 
-        for result in filtered_results[0].boxes:
-            classname, _, xmin, ymin, xmax, ymax = self._get_result_info(result)
+        for result in filtered_results:
+            classname = result["label"]
+            xmin, ymin, xmax, ymax = result["bbox"]
             if classname not in self.ball_class_names:
                 continue
 
-            center_x = int((xmin + xmax) / 2)
-            center_y = int((ymin + ymax) / 2)
+            center_x, center_y = result["center"]
             center_x = int(np.clip(center_x, 0, frame_width - 1))
             center_y = int(np.clip(center_y, 0, frame_height - 1))
 
@@ -221,18 +297,18 @@ class DetectionModel:
         cv2.putText(frame, fps_text, (frame_width - 90, 24), 
                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
         
-        if not filtered_results or filtered_results[0].boxes is None:
+        if not filtered_results:
             self._draw_notifications(frame, overlay_lines)
             return
 
-        boxes = filtered_results[0].boxes
         self.total_objects = 0
 
         object_data = []
-        for result in boxes:
-            classname, color, xmin, ymin, xmax, ymax = self._get_result_info(
-                result)
-            conf = result.conf.item()
+        for result in filtered_results:
+            classname = result["label"]
+            color = result["color"]
+            xmin, ymin, xmax, ymax = result["bbox"]
+            conf = result["conf"]
 
             if conf > config.conf_threshold:
                 object_data.append(
@@ -307,9 +383,6 @@ class DetectionModel:
 
         self._draw_notifications(frame, overlay_lines)
 
-        cv2.namedWindow("Detection", cv2.WINDOW_NORMAL)
-        cv2.imshow("Detection", frame)
-
     def _draw_notifications(self, frame, overlay_lines):
         if not overlay_lines:
             return
@@ -338,12 +411,10 @@ class DetectionModel:
 
     def extract_bounding_boxes(self, frame, results):
         bounding_boxes = []
-        if results is None or len(results) == 0:
+        if not results:
             return None
         for result in results:
-            for box in result.boxes:
-                _, _, xmin, ymin, xmax, ymax = self._get_result_info(box)
-                bounding_boxes.append((xmin, ymin, xmax, ymax))
+            bounding_boxes.append(result["bbox"])
 
         mask = np.zeros_like(frame[:, :, 0])
         for (xmin, ymin, xmax, ymax) in bounding_boxes:

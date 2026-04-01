@@ -13,6 +13,30 @@ from snookervision.game_logic.game_logic import (
 
 logger = logging.getLogger(__name__)
 
+# BallType → detection colour name
+_BALLTYPE_TO_NAME = {
+    BallType.CUE: "white",
+    BallType.RED: "red",
+    BallType.YELLOW: "yellow",
+    BallType.GREEN: "green",
+    BallType.BROWN: "brown",
+    BallType.BLUE: "blue",
+    BallType.PINK: "pink",
+    BallType.BLACK: "black",
+}
+
+# LED colours per ball (RGB for the LED strip)
+_BALL_LED_COLORS = {
+    "white": (255, 255, 255),
+    "red": (255, 0, 0),
+    "yellow": (255, 255, 0),
+    "green": (0, 255, 0),
+    "brown": (139, 69, 19),
+    "blue": (0, 0, 255),
+    "pink": (255, 105, 180),
+    "black": (100, 100, 100),
+}
+
 
 class StateManager():
     def __init__(self):
@@ -57,6 +81,18 @@ class StateManager():
             "bottom_middle",
             "bottom_right",
         ]
+        # LED reposition queue
+        self.led_controller = None
+        self.shot_start_positions = {}
+        self.reposition_queue = []
+        self.reposition_index = 0
+        self.reposition_confirm_count = 0
+        self.foul_reposition_active = False
+        self.reposition_hold_active = False
+        self.reposition_hold_start = None
+        self.foul_flash_active = False
+        self.foul_flash_start = None
+        self.foul_potted_colors = set()
 
     def initialize(self, config, state, arduino_port=None, arduino_baud=115200):
         """Initialize the StateManager with configuration and state objects"""
@@ -70,10 +106,19 @@ class StateManager():
         if arduino_port:
             self.arduino = ArduinoDisplayBridge(arduino_port, arduino_baud)
             self.arduino.connect()
+        if config.led_enabled:
+            from snookervision.led import LEDController
+            self.led_controller = LEDController(
+                config.led_arduino_ip, config.led_arduino_port
+            )
+            if self.led_controller.connect():
+                self.led_controller.send_resize(
+                    config.output_dimensions[0], config.output_dimensions[1]
+                )
         self._rebuild_overlay_lines()
         self._sync_arduino_display(force=True)
 
-    def update(self, detections, labels):
+    def update(self, detections, labels=None):
         if not self.config or not self.state:
             logger.error(
                 "StateManager not initialized. Call initialize() first.")
@@ -95,7 +140,7 @@ class StateManager():
         num_balls = 0
         self.not_moved_counter = 0
 
-        if not detections or not detections[0].boxes:
+        if not detections:
             self._update_hit_order({}, current_time)
             pot_notifications = self._update_tracks_and_detect_pots(balls, current_time)
             self._feed_game_logic(balls, pot_notifications, current_time)
@@ -104,8 +149,8 @@ class StateManager():
             self._sync_arduino_display()
             return
 
-        for ball in detections[0].boxes:
-            classname, middlex, middley = self._get_ball_info(ball, labels)
+        for ball in detections:
+            classname, middlex, middley = self._get_ball_info(ball)
             if classname in {"arm", "hole"}:
                 continue
 
@@ -137,19 +182,18 @@ class StateManager():
         pot_notifications = self._update_tracks_and_detect_pots(balls, current_time)
         self._feed_game_logic(balls, pot_notifications, current_time)
         self._notify_pots(pot_notifications)
+        if self.foul_flash_active:
+            self._check_foul_flash(current_time, balls)
+        if self.foul_reposition_active:
+            self._check_reposition_progress(balls, current_time)
         self._rebuild_overlay_lines()
         self._sync_arduino_display()
 
         self._update_and_send_balls(balls, corrected_white_ball, current_time)
 
-    def _get_ball_info(self, ball, labels):
-        xyxy_tensor = ball.xyxy.cpu()
-        xyxy = xyxy_tensor.numpy().squeeze()
-        xmin, ymin, xmax, ymax = map(int, xyxy.astype(int))
-        classidx: int = int(ball.cls.item())
-        classname: str = labels[classidx]
-        _middlex: int = int((xmin + xmax) // 2)
-        _middley: int = int((ymin + ymax) // 2)
+    def _get_ball_info(self, ball):
+        classname = ball["label"]
+        _middlex, _middley = ball["center"]
 
         middlex, middley = self._coords_clamped(_middlex, _middley)
         return classname, middlex, middley
@@ -389,6 +433,214 @@ class StateManager():
             )
         self._sync_arduino_display(force=True, latest_outputs=outputs)
 
+    # ---- LED foul flash + reposition queue ------------------------------------
+
+    def _start_foul_flash(self, now):
+        """Send the FOUL command to the LED strip and start the flash timer.
+
+        Also records which colour balls were potted so we can wait for CV
+        to confirm they are off the table before starting reposition.
+        """
+        if self.led_controller:
+            logger.info("[LED] Sending FOUL command to ESP32")
+            self.led_controller.send_foul()
+        else:
+            logger.warning("[LED] No led_controller — cannot send FOUL (led_enabled=%s)",
+                           getattr(self.config, "led_enabled", None))
+        # Record the potted ball colours that need to be confirmed off-table
+        fs = self.game_state.current_frame
+        potted_names = set()
+        if fs is not None:
+            for ball_type in fs.ctx.potted:
+                name = _BALLTYPE_TO_NAME.get(ball_type)
+                if name:
+                    potted_names.add(name)
+            if fs.ctx.cue_potted:
+                potted_names.add("white")
+        self.foul_potted_colors = potted_names
+        self.foul_flash_active = True
+        self.foul_flash_start = now
+        logger.info("[LED] FOUL flash started — waiting for %s to be off table",
+                    ", ".join(c.upper() for c in potted_names) or "none")
+
+    def _check_foul_flash(self, now, balls):
+        """Keep FOUL lit until CV confirms potted balls are off the table, then reposition."""
+        # Minimum display time so the foul is visible even if balls vanish instantly
+        min_duration = float(getattr(self.config, "led_foul_flash_seconds", 3.0))
+        if now - self.foul_flash_start < min_duration:
+            return
+
+        # Check CV: each potted colour must NOT be detected on the table
+        for color in self.foul_potted_colors:
+            detected = balls.get(color, [])
+            if color == "red":
+                # Reds: we only care that the count decreased, but the simplest
+                # check is that at least one red is gone.  Since we can't know
+                # the exact count that was potted here, just skip reds — they
+                # aren't re-spotted anyway.
+                continue
+            if detected:
+                # Ball still visible on table — keep FOUL lit
+                return
+
+        # All potted balls confirmed off table
+        if self.led_controller:
+            self.led_controller.send_clear()
+        self.foul_flash_active = False
+        self.foul_flash_start = None
+        self.foul_potted_colors = set()
+        logger.info("[LED] FOUL flash ended — potted balls confirmed off table, starting reposition")
+        self._build_reposition_queue()
+
+    def _build_reposition_queue(self):
+        """Build ordered list of balls to reposition after a foul.
+
+        Uses the shot-start snapshot to know where each ball was before
+        the foul stroke displaced them.
+        """
+        fs = self.game_state.current_frame
+        if fs is None:
+            return
+        ctx = fs.ctx
+        queue = []
+
+        # Colour balls that were potted illegally (re-spotted to their old position)
+        for ball_type in ctx.potted:
+            name = _BALLTYPE_TO_NAME.get(ball_type)
+            if name and name != "white":
+                positions = self.shot_start_positions.get(name, [])
+                if positions:
+                    pos = positions[0]
+                    queue.append({
+                        "color_name": name,
+                        "x": int(pos["x"]),
+                        "y": int(pos["y"]),
+                        "led_color": _BALL_LED_COLORS.get(name, (255, 255, 255)),
+                    })
+
+        # Cue ball potted (ball-in-hand) — show where it was
+        if ctx.cue_potted:
+            whites = self.shot_start_positions.get("white", [])
+            if whites:
+                pos = whites[0]
+                queue.append({
+                    "color_name": "white",
+                    "x": int(pos["x"]),
+                    "y": int(pos["y"]),
+                    "led_color": _BALL_LED_COLORS["white"],
+                })
+
+        if not queue:
+            return
+
+        self.reposition_queue = queue
+        self.reposition_index = 0
+        self.reposition_confirm_count = 0
+        self.foul_reposition_active = True
+        logger.info(
+            f"[LED] Reposition queue: "
+            + ", ".join(f"{q['color_name']}@({q['x']},{q['y']})" for q in queue)
+        )
+        self._light_current_reposition_target()
+
+    def _light_current_reposition_target(self):
+        """Send the current queue entry's position+colour to the LED strips."""
+        if not self.led_controller:
+            return
+        if self.reposition_index >= len(self.reposition_queue):
+            return
+        target = self.reposition_queue[self.reposition_index]
+        r, g, b = target["led_color"]
+        self.led_controller.send_ball(target["x"], target["y"], r, g, b)
+        logger.info(
+            f"[LED] Lighting {target['color_name'].upper()} "
+            f"at ({target['x']}, {target['y']}) "
+            f"[{self.reposition_index + 1}/{len(self.reposition_queue)}]"
+        )
+
+    def _check_reposition_progress(self, balls, now):
+        """Check if the current target ball has been placed near its position.
+
+        When confirmed for enough frames, hold the LED for a few seconds,
+        then advance to the next ball in the queue.
+        """
+        if self.reposition_index >= len(self.reposition_queue):
+            self.clear_foul_leds()
+            return
+
+        # ---- Hold phase: LED stays lit after confirmed placement ----
+        if self.reposition_hold_active:
+            hold_secs = float(getattr(self.config, "led_reposition_hold_seconds", 3.0))
+            if now - self.reposition_hold_start >= hold_secs:
+                self.reposition_hold_active = False
+                self.reposition_hold_start = None
+                self.reposition_index += 1
+                self.reposition_confirm_count = 0
+
+                if self.reposition_index >= len(self.reposition_queue):
+                    self.clear_foul_leds()
+                    logger.info("[LED] All balls repositioned")
+                else:
+                    if self.led_controller:
+                        self.led_controller.send_clear()
+                    self._light_current_reposition_target()
+            return
+
+        # ---- Check phase: is the ball near the target? ----
+        target = self.reposition_queue[self.reposition_index]
+        threshold = max(10, int(self.config.led_reposition_threshold_px))
+        needed_frames = max(1, int(self.config.led_reposition_confirm_frames))
+
+        detected_positions = balls.get(target["color_name"], [])
+        placed = False
+        for pos in detected_positions:
+            dist = math.hypot(pos["x"] - target["x"], pos["y"] - target["y"])
+            if dist <= threshold:
+                placed = True
+                break
+
+        if placed:
+            self.reposition_confirm_count += 1
+            if self.reposition_confirm_count >= needed_frames:
+                logger.info(
+                    f"[LED] {target['color_name'].upper()} repositioned OK "
+                    f"[{self.reposition_index + 1}/{len(self.reposition_queue)}] "
+                    f"— holding {getattr(self.config, 'led_reposition_hold_seconds', 3.0)}s"
+                )
+                self.reposition_hold_active = True
+                self.reposition_hold_start = now
+        else:
+            self.reposition_confirm_count = 0
+
+    def clear_foul_leds(self):
+        """Stop all LED indication and reset foul flash + reposition queue."""
+        if self.led_controller:
+            self.led_controller.send_clear()
+        self.foul_flash_active = False
+        self.foul_flash_start = None
+        self.foul_potted_colors = set()
+        self.foul_reposition_active = False
+        self.reposition_hold_active = False
+        self.reposition_hold_start = None
+        self.reposition_queue = []
+        self.reposition_index = 0
+        self.reposition_confirm_count = 0
+        logger.info("[LED] Foul indicator cleared")
+
+    def skip_reposition_target(self):
+        """Skip the current reposition target and move to the next, or finish."""
+        if not self.foul_reposition_active:
+            return
+        self.reposition_index += 1
+        self.reposition_confirm_count = 0
+        if self.reposition_index >= len(self.reposition_queue):
+            self.clear_foul_leds()
+            logger.info("[LED] Reposition skipped — all done")
+        else:
+            if self.led_controller:
+                self.led_controller.send_clear()
+            self._light_current_reposition_target()
+
     def _feed_game_logic(self, balls, pot_notifications, now):
         if any((n.get("colour") or "").lower() == "red" for n in pot_notifications):
             self.red_potted_ever = True
@@ -397,6 +649,14 @@ class StateManager():
         shot_end_grace = max(0.2, float(getattr(self.config, "pot_missing_seconds", 2.0)))
 
         if self.shot_active and not self.game_shot_open:
+            if self.foul_flash_active or self.foul_reposition_active:
+                self.clear_foul_leds()
+            # Snapshot ball positions before the shot changes anything
+            if self.previous_state:
+                self.shot_start_positions = {
+                    c: [dict(p) for p in positions]
+                    for c, positions in self.previous_state.items()
+                }
             outputs = self.rule_engine.on_event(Event(now, EventType.SHOT_START))
             self._push_game_outputs(outputs)
             self.game_shot_open = True
@@ -412,6 +672,9 @@ class StateManager():
         if can_end_shot:
             outputs = self.rule_engine.on_event(Event(now, EventType.SHOT_END))
             self._push_game_outputs(outputs)
+            # Flash FOUL on the table, then reposition after the flash
+            if any(msg.startswith("FOUL") for msg in outputs):
+                self._start_foul_flash(now)
             self.game_shot_open = False
             self.first_contact_sent_this_shot = False
 
@@ -545,6 +808,14 @@ class StateManager():
             f"Turn: {turn_name}",
             f"Target: {target_name}",
         ]
+        if self.foul_reposition_active and self.reposition_index < len(self.reposition_queue):
+            target = self.reposition_queue[self.reposition_index]
+            total = len(self.reposition_queue)
+            idx = self.reposition_index + 1
+            self.live_overlay_lines.append(
+                f"[REPOSITION {idx}/{total}] Place {target['color_name'].upper()} "
+                f"at ({target['x']}, {target['y']}) - R to skip"
+            )
 
     def _sanitize_lcd_text(self, text, limit=16):
         safe = (text or "").replace("|", "/").replace("\n", " ").replace("\r", " ").strip()

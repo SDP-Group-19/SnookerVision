@@ -5,6 +5,13 @@ from liveconfig import liveclass
 class Config:
     def __init__(self):
         self.camera_port = 1
+        self.camera_source = None
+        self.camera_width = 1920
+        self.camera_height = 1080
+        self.camera_fps = 30
+        self.camera_buffer_size = 1
+        self.detector_device = "auto"
+        self.fast_mode = False
         self.font_color = (255, 255, 255)
         self.font_scale = 1.0
         self.font_thickness = 2
@@ -37,12 +44,13 @@ class Config:
         self.use_hidden_balls = False
         self.use_model = True
         self.process_every_n_frames = 2
+        self.detector_imgsz = 960
         self.detection_model_path = "final/src/snookervision/data/model/best_color.pt"
         self.position_threshold = 6
         self.hole_threshold = 30
-        self.conf_threshold = 0.75
+        self.conf_threshold = 0.15
         self.draw_results = True
-        self.show_generated_table = True
+        self.show_generated_table = False
         self.generated_table_size = (560, 280)  # (width, height)
         self.generated_table_window_name = "Generated Table"
         self.enable_pot_notifications = True
@@ -56,10 +64,21 @@ class Config:
         self.hit_stationary_reset_seconds = 1.0
         self.pot_overlay_ttl_frames = 60
         self.hide_windows = False
-        self.use_calibration = False  # Disabled - causes zoom issues
+        self.use_calibration = False
         self.use_table_pts = False  # Disabled - select manually on first run
-        self.model_image_path = "./tests/src/data/model/training_images/"
+        self.model_image_path = "final/src/snookervision/data/model/training_images/"
         self.collect_model_images = False
-        self.calibration_params_path = "./tests/src/data/calibration_params.json"
-        self.calibration_images_path = "./tests/src/data/calibration_images/"
-        self.table_pts_path = "./tests/src/data/table_pts.json"
+        self.calibration_params_path = "final/src/snookervision/data/calibration_params.json"
+        self.calibration_images_path = "final/src/snookervision/data/calibration_images/"
+        self.table_pts_path = "final/src/snookervision/data/table_pts.json"
+        # LED strip settings (ESP32 via TCP)
+        self.led_enabled = False
+        self.led_arduino_ip = "192.168.4.1"
+        self.led_arduino_port = 5000
+        self.led_foul_flash_seconds = 3.0
+        self.led_reposition_threshold_px = 40
+        self.led_reposition_confirm_frames = 5
+        self.led_reposition_hold_seconds = 3.0
+        # Trajectory prediction
+        self.show_trajectory = True
+        self.trajectory_led = False

@@ -21,6 +21,7 @@ from snookervision.detection import DetectionModel
 from snookervision import config, state, load_camera, parse_args, capture_frame
 from snookervision.state import StateManager
 from snookervision.visualization import GeneratedTableRenderer
+from snookervision.trajectory import TrajectoryPredictor, CueDetector, TrajectoryRenderer
 
 
 
@@ -43,6 +44,22 @@ def main():
     fps = 0.0
     args = parse_args()
     config.camera_port = args.camera_port
+    config.camera_source = args.camera_source
+    config.camera_width = args.camera_width
+    config.camera_height = args.camera_height
+    config.camera_fps = args.camera_fps
+    config.process_every_n_frames = max(1, args.process_every_n_frames)
+    config.detector_imgsz = max(128, args.detector_imgsz)
+    config.detector_device = args.detector_device
+    config.fast_mode = args.fast_mode
+    config.hide_windows = args.hide_windows
+    config.draw_results = not args.no_draw_results
+    config.show_generated_table = args.show_generated_table
+    config.use_calibration = args.use_calibration
+    config.led_enabled = args.led_enabled
+    config.led_arduino_ip = args.led_ip
+    config.led_arduino_port = args.led_port
+    config.show_trajectory = args.show_trajectory and not args.no_trajectory
     if not args.no_interface:
         start_interface("web", port=args.interface_port)
 
@@ -72,13 +89,15 @@ def main():
         camera = load_camera()
         if camera is None:
             logger.error(
-                "Camera initialization failed. Try --camera-port 1 (or 2) and --no-interface."
+                "Camera initialization failed. Try --camera-source http://<raspberrypi>:8000/stream.mjpg or --camera-port 1 and --no-interface."
             )
             return
-
-        ret, frame = camera.read()
+        ret, frame = camera.read(timeout=5.0)
         if not ret:
-            logger.error("Failed to read from camera.")
+            logger.error(
+                "Failed to read the first frame from camera within 5 seconds. "
+                "If you are using a Raspberry Pi stream, verify the Pi server is running and the stream URL opens in a browser."
+            )
             return
 
     processed_frame = frame
@@ -120,8 +139,20 @@ def main():
     detection_model = DetectionModel()
     if detection_model.model is None:
         return
-    table_renderer = GeneratedTableRenderer(config.generated_table_size)
+    table_renderer = None
+    if config.show_generated_table and not config.hide_windows:
+        table_renderer = GeneratedTableRenderer(config.generated_table_size)
     show_live_view = not args.overlay_only
+
+    # Trajectory prediction
+    trajectory_predictor = None
+    cue_detector = None
+    trajectory_renderer = None
+    if config.show_trajectory:
+        tw, th = config.output_dimensions
+        trajectory_predictor = TrajectoryPredictor(tw, th)
+        cue_detector = CueDetector()
+        trajectory_renderer = TrajectoryRenderer()
 
     state_manager = StateManager()
     state_manager.initialize(
@@ -131,8 +162,8 @@ def main():
         arduino_baud=args.arduino_baud,
     )
 
-    if show_live_view:
-        # Create resizable window for fullscreen capability
+    # Create resizable window for fullscreen capability
+    if not config.hide_windows and show_live_view:
         cv2.namedWindow("Detection", cv2.WINDOW_NORMAL)
 
     import logging
@@ -161,16 +192,54 @@ def main():
         if config.collect_model_images or config.collect_ae_data:
             capture_frame(None, processed_frame)
 
-        overlay_lines = state_manager.get_overlay_lines()
+        overlay_lines = None if config.fast_mode else state_manager.get_overlay_lines()
         detections, labels = detection_model.handle_detection(
             processed_frame,
             fps,
             overlay_lines=overlay_lines,
             show_live_view=show_live_view,
         )
-        state_manager.update(detections, labels)
+        if not config.fast_mode:
+            state_manager.update(detections)
 
-        if config.show_generated_table and not config.hide_windows:
+        # --- Trajectory prediction ---
+        if (
+            config.show_trajectory
+            and trajectory_predictor is not None
+            and detections
+            and not state_manager.shot_active
+        ):
+            white_pos = None
+            other_balls = []
+            for det in detections:
+                if det["label"] == "white":
+                    white_pos = det["center"]
+                elif det["label"] in detection_model.ball_class_names:
+                    cx, cy = det["center"]
+                    other_balls.append({"x": cx, "y": cy, "color": det["label"]})
+
+            if white_pos is not None:
+                aim = cue_detector.detect_aim(processed_frame, white_pos, detections)
+                if aim is not None:
+                    prediction = trajectory_predictor.predict(
+                        cue_pos=white_pos,
+                        aim_direction=aim,
+                        balls=other_balls,
+                    )
+                    if prediction is not None:
+                        if not config.hide_windows:
+                            trajectory_renderer.draw_on_frame(
+                                processed_frame, prediction)
+                        if config.trajectory_led and state_manager.led_controller:
+                            trajectory_renderer.send_to_leds(
+                                state_manager.led_controller, prediction)
+
+        if (
+            not config.fast_mode
+            and config.show_generated_table
+            and not config.hide_windows
+            and table_renderer is not None
+        ):
             markers = detection_model.get_ball_markers(processed_frame, detections)
             generated_table = table_renderer.render(processed_frame.shape, markers)
             for idx, text in enumerate(overlay_lines):
@@ -192,7 +261,7 @@ def main():
             except cv2.error:
                 pass
 
-        if state.autoencoder is not None \
+        if not config.fast_mode and state.autoencoder is not None \
                 and config.use_obstruction_detection \
                 and config.use_model:
             table_only = detection_model.extract_bounding_boxes(
@@ -212,11 +281,18 @@ def main():
             logging.info(f"Current FPS: {fps:.2f}")
             last_fps_log_time = now
 
-        if cv2.waitKey(1) & 0xFF == ord("q"):
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("q"):
             break
+        elif key == ord("r") and state_manager.foul_reposition_active:
+            # Skip current ball or clear if last one
+            state_manager.skip_reposition_target()
 
     camera.release()
     cv2.destroyAllWindows()
+    state_manager.clear_foul_leds()
+    if state_manager.led_controller:
+        state_manager.led_controller.close()
     state_manager.shutdown()
     if config.use_networking:
         state.network.disconnect()

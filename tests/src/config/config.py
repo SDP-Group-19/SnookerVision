@@ -40,10 +40,10 @@ class Config:
         self.detection_model_path = "./tests/model/best_color.pt"  # Your trained model
         self.position_threshold = 6
         self.hole_threshold = 30
-        self.conf_threshold = 0.5
+        self.conf_threshold = 0.2   
         self.draw_results = True
         self.hide_windows = False
-        self.use_calibration = False  # Disabled - causes zoom issues
+        self.use_calibration = True
         self.use_table_pts = False  # Disabled - select manually on first run
         self.model_image_path = "./tests/src/data/model/training_images/"
         self.collect_model_images = False
