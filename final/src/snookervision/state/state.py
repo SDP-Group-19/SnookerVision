@@ -714,11 +714,70 @@ class StateManager():
             return
 
         logger.info("[DISPLAY] Event: %s", normalized)
-        if normalized == "LAST_POSITION":
+        if normalized == "DISPLAY_1_UP":
+            self._adjust_player_score(1, 1)
+        elif normalized == "DISPLAY_1_DOWN":
+            self._adjust_player_score(1, -1)
+        elif normalized == "DISPLAY_2_UP":
+            self._adjust_player_score(2, 1)
+        elif normalized == "DISPLAY_2_DOWN":
+            self._adjust_player_score(2, -1)
+        elif normalized == "CHANGE_PLAYER":
+            self._toggle_active_player()
+        elif normalized == "FULL_RESET":
+            self._reset_game_from_display()
+        elif normalized == "LAST_POSITION":
             if self.foul_reposition_active:
                 self.skip_reposition_target()
             else:
                 self.start_last_position_reposition()
+
+    def _adjust_player_score(self, player_index, delta):
+        player = self.game_state.player1 if player_index == 1 else self.game_state.player2
+        player.score = max(0, player.score + int(delta))
+        self.last_potted_text = "-"
+        self._rebuild_overlay_lines()
+        self._sync_arduino_display(force=True)
+
+    def _toggle_active_player(self):
+        frame = self.game_state.current_frame
+        if frame is None:
+            return
+
+        frame.swap_players()
+        self._rebuild_overlay_lines()
+        self._sync_arduino_display(force=True)
+
+    def _reset_game_from_display(self):
+        self.clear_foul_leds()
+        self.game_state.start_frame()
+        self.rule_engine = RuleEngine(self.game_state)
+        self.previous_state = None
+        self.ball_tracks = {}
+        self.next_track_id = 1
+        self.pot_notifications = []
+        self.recent_non_red_pots = []
+        self.pot_counter = 0
+        self.overlay_notifications = []
+        self.shot_active = False
+        self.shot_last_motion_time = None
+        self.shot_stopped_at = None
+        self.first_object_hit_colour = None
+        self.second_object_hit_colour = None
+        self.last_potted_text = "-"
+        self.last_ball_hit_text = "-"
+        self.last_foul_text = "-"
+        self.show_foul_until = 0.0
+        self.last_shot_active = False
+        self.game_shot_open = False
+        self.first_contact_sent_this_shot = False
+        self.no_reds_announced = False
+        self.red_potted_ever = False
+        self.zero_red_since = None
+        self.current_balls_snapshot = {}
+        self.shot_start_positions = {}
+        self._rebuild_overlay_lines()
+        self._sync_arduino_display(force=True)
 
     def _feed_game_logic(self, balls, pot_notifications, now):
         if any((n.get("colour") or "").lower() == "red" for n in pot_notifications):
