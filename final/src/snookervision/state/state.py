@@ -12,6 +12,7 @@ from snookervision.game_logic.game_logic import (
     GameState,
     RuleEngine,
 )
+from snookervision.state.pocket_sensor import PocketSensor
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,8 @@ class StateManager():
         self.zero_red_since = None
         self.arduino = None
         self.arduino_state = None
+        self.pocket_sensor = None
+        self.pending_pocket_triggers = []
         self.current_balls_snapshot = {}
         self.pocket_names = [
             "top_left",
@@ -114,6 +117,10 @@ class StateManager():
         if arduino_port:
             self.arduino = ArduinoDisplayBridge(arduino_port, arduino_baud)
             self.arduino.connect()
+        if getattr(config, "pocket_sensor_enabled", False):
+            self.pocket_sensor = PocketSensor(config)
+            if not self.pocket_sensor.connect():
+                self.pocket_sensor = None
         if config.led_enabled:
             from snookervision.led import LEDController
             self.led_controller = LEDController(
@@ -385,6 +392,7 @@ class StateManager():
         if not self.config.enable_pot_notifications:
             return []
 
+        cv_candidates = []
         events = []
         match_threshold = max(8, int(self.config.pot_tracking_match_px))
         pocket_threshold = max(10, int(self.config.pot_pocket_radius_px))
@@ -466,19 +474,16 @@ class StateManager():
                             break
 
                     if allow_emit:
-                        self.pot_counter += 1
-                        events.append({
-                            "order": self.pot_counter,
+                        cv_candidates.append({
                             "track_id": track["id"],
                             "colour": track["colour"],
+                            "pocket_idx": track["pocket_idx"],
                             "pocket": pocket_name,
                             "missing_seconds": missing_duration,
                         })
-                        self.recent_non_red_pots.append(
-                            {"colour": track["colour"], "pocket": pocket_name, "time": now}
-                        )
-                    track["potted"] = True
-                    track["potted_at"] = now
+                    else:
+                        track["potted"] = True
+                        track["potted_at"] = now
                     continue
 
             if age > stale_seconds:
@@ -491,8 +496,134 @@ class StateManager():
             p for p in self.recent_non_red_pots if now - p["time"] <= non_red_cooldown
         ]
 
+        events.extend(self._resolve_pot_candidates(cv_candidates, now))
         events.sort(key=lambda e: e["order"])
         return events
+
+    def _poll_pocket_sensor_events(self, now):
+        if self.pocket_sensor is None:
+            return
+
+        match_window = max(0.2, float(getattr(self.config, "pocket_sensor_match_seconds", 2.5)))
+        for event in self.pocket_sensor.drain_events():
+            if event.get("state") != "active":
+                continue
+            self.pending_pocket_triggers.append(event)
+
+        self.pending_pocket_triggers = [
+            event for event in self.pending_pocket_triggers
+            if now - float(event.get("time", now)) <= match_window
+        ]
+
+    def _resolve_pot_candidates(self, cv_candidates, now):
+        if self.pocket_sensor is None:
+            return [
+                self._finalize_cv_pot_candidate(candidate, candidate["pocket_idx"], now)
+                for candidate in cv_candidates
+            ]
+
+        self._poll_pocket_sensor_events(now)
+        sensor_triggers = self.pending_pocket_triggers
+        self.pending_pocket_triggers = []
+
+        if cv_candidates and not sensor_triggers:
+            for candidate in cv_candidates:
+                self._reject_cv_pot_candidate(candidate["track_id"])
+            return []
+
+        events = []
+        used_sensor_count = 0
+        for candidate in cv_candidates:
+            if used_sensor_count >= len(sensor_triggers):
+                self._reject_cv_pot_candidate(candidate["track_id"])
+                continue
+
+            trigger = sensor_triggers[used_sensor_count]
+            used_sensor_count += 1
+            events.append(self._finalize_cv_pot_candidate(candidate, trigger["pocket_idx"], now))
+
+        for trigger in sensor_triggers[used_sensor_count:]:
+            fallback_event = self._create_sensor_only_pot_event(trigger["pocket_idx"], now)
+            if fallback_event is not None:
+                events.append(fallback_event)
+
+        return events
+
+    def _reject_cv_pot_candidate(self, track_id):
+        track = self.ball_tracks.get(track_id)
+        if track is None:
+            return
+        track["missing_since"] = None
+        track["pocket_idx"] = None
+
+    def _finalize_cv_pot_candidate(self, candidate, pocket_idx, now):
+        track = self.ball_tracks.get(candidate["track_id"])
+        if track is not None:
+            track["potted"] = True
+            track["potted_at"] = now
+
+        pocket_name = self.pocket_names[pocket_idx]
+        self.pot_counter += 1
+        event = {
+            "order": self.pot_counter,
+            "track_id": candidate["track_id"],
+            "colour": candidate["colour"],
+            "pocket": pocket_name,
+            "missing_seconds": candidate["missing_seconds"],
+            "source": "cv+sensor",
+        }
+        self.recent_non_red_pots.append(
+            {"colour": candidate["colour"], "pocket": pocket_name, "time": now}
+        )
+        return event
+
+    def _create_sensor_only_pot_event(self, pocket_idx, now):
+        colour = (self.first_object_hit_colour or "").lower()
+        if not colour or colour in {"white", "arm", "hole"}:
+            logger.info("[POCKET] Sensor trigger ignored: no usable last-hit ball")
+            return None
+
+        track_id = self._claim_missing_track_for_sensor_pot(colour, pocket_idx, now)
+        if track_id is None:
+            track_id = 0
+
+        pocket_name = self.pocket_names[pocket_idx]
+        self.pot_counter += 1
+        event = {
+            "order": self.pot_counter,
+            "track_id": track_id,
+            "colour": colour,
+            "pocket": pocket_name,
+            "missing_seconds": 0.0,
+            "source": "sensor_only",
+        }
+        self.recent_non_red_pots.append(
+            {"colour": colour, "pocket": pocket_name, "time": now}
+        )
+        return event
+
+    def _claim_missing_track_for_sensor_pot(self, colour, pocket_idx, now):
+        candidates = []
+        for track_id, track in self.ball_tracks.items():
+            if track.get("potted"):
+                continue
+            if track.get("colour") != colour:
+                continue
+            if track.get("missing_since") is None:
+                continue
+            score = 0 if track.get("pocket_idx") == pocket_idx else 1
+            candidates.append((score, track.get("missing_since"), track_id))
+
+        if not candidates:
+            return None
+
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        track_id = candidates[0][2]
+        track = self.ball_tracks.get(track_id)
+        if track is not None:
+            track["potted"] = True
+            track["potted_at"] = now
+        return track_id
 
     def _notify_pots(self, pot_notifications):
         if not pot_notifications:
@@ -826,13 +957,13 @@ class StateManager():
 
         logger.info("[DISPLAY] Event: %s", normalized)
         if normalized == "DISPLAY_1_UP":
-            self._adjust_player_score(1, 1)
+            self._adjust_player_score(self._player_index_for_display(1), 1)
         elif normalized == "DISPLAY_1_DOWN":
-            self._adjust_player_score(1, -1)
+            self._adjust_player_score(self._player_index_for_display(1), -1)
         elif normalized == "DISPLAY_2_UP":
-            self._adjust_player_score(2, 1)
+            self._adjust_player_score(self._player_index_for_display(2), 1)
         elif normalized == "DISPLAY_2_DOWN":
-            self._adjust_player_score(2, -1)
+            self._adjust_player_score(self._player_index_for_display(2), -1)
         elif normalized == "CHANGE_PLAYER":
             self._toggle_active_player()
         elif normalized == "FULL_RESET":
@@ -1084,11 +1215,19 @@ class StateManager():
             return safe[:limit]
         return safe
 
+    def _display_index_for_player(self, player_index):
+        return 2 if player_index == 1 else 1
+
+    def _player_index_for_display(self, display_index):
+        return 1 if display_index == 2 else 2
+
     def _active_player_index(self):
         frame = self.game_state.current_frame
         if frame is None:
-            return 1
-        return 1 if frame.activePlayer is self.game_state.player1 else 2
+            return 2
+        if frame.activePlayer is self.game_state.player1:
+            return self._display_index_for_player(1)
+        return self._display_index_for_player(2)
 
     def _format_target_name(self, target):
         if not target:
@@ -1136,10 +1275,13 @@ class StateManager():
         if not force and next_state == self.arduino_state:
             return
 
+        player1_display = self._display_index_for_player(1)
+        player2_display = self._display_index_for_player(2)
+
         if force or self.arduino_state is None or self.arduino_state["score1"] != score1:
-            self.arduino.send_command(f"SET 1 {score1}")
+            self.arduino.send_command(f"SET {player1_display} {score1}")
         if force or self.arduino_state is None or self.arduino_state["score2"] != score2:
-            self.arduino.send_command(f"SET 2 {score2}")
+            self.arduino.send_command(f"SET {player2_display} {score2}")
 
         if force or self.arduino_state is None or self.arduino_state["active_player"] != active_player:
             self.arduino.send_command("LIGHTOFF")
@@ -1156,10 +1298,10 @@ class StateManager():
         self.arduino_state = next_state
 
     def shutdown(self):
-        if self.arduino is not None:
-            self.arduino.close()
         if self.pocket_sensor is not None:
             self.pocket_sensor.close()
+        if self.arduino is not None:
+            self.arduino.close()
 
     def _advance_overlay_notifications(self):
         updated = []
