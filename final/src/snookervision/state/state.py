@@ -846,13 +846,13 @@ class StateManager():
 
         logger.info("[DISPLAY] Event: %s", normalized)
         if normalized == "DISPLAY_1_UP":
-            self._adjust_player_score(1, 1)
+            self._adjust_player_score(self._player_index_for_display(1), 1)
         elif normalized == "DISPLAY_1_DOWN":
-            self._adjust_player_score(1, -1)
+            self._adjust_player_score(self._player_index_for_display(1), -1)
         elif normalized == "DISPLAY_2_UP":
-            self._adjust_player_score(2, 1)
+            self._adjust_player_score(self._player_index_for_display(2), 1)
         elif normalized == "DISPLAY_2_DOWN":
-            self._adjust_player_score(2, -1)
+            self._adjust_player_score(self._player_index_for_display(2), -1)
         elif normalized == "CHANGE_PLAYER":
             self._toggle_active_player()
         elif normalized == "FULL_RESET":
@@ -1096,11 +1096,19 @@ class StateManager():
             return safe[:limit]
         return safe
 
+    def _display_index_for_player(self, player_index):
+        return 2 if player_index == 1 else 1
+
+    def _player_index_for_display(self, display_index):
+        return 1 if display_index == 2 else 2
+
     def _active_player_index(self):
         frame = self.game_state.current_frame
         if frame is None:
             return 2
-        return 2 if frame.activePlayer is self.game_state.player1 else 1
+        if frame.activePlayer is self.game_state.player1:
+            return self._display_index_for_player(1)
+        return self._display_index_for_player(2)
 
     def _format_target_name(self, target):
         if not target:
@@ -1148,10 +1156,13 @@ class StateManager():
         if not force and next_state == self.arduino_state:
             return
 
+        player1_display = self._display_index_for_player(1)
+        player2_display = self._display_index_for_player(2)
+
         if force or self.arduino_state is None or self.arduino_state["score1"] != score1:
-            self.arduino.send_command(f"SET 1 {score1}")
+            self.arduino.send_command(f"SET {player1_display} {score1}")
         if force or self.arduino_state is None or self.arduino_state["score2"] != score2:
-            self.arduino.send_command(f"SET 2 {score2}")
+            self.arduino.send_command(f"SET {player2_display} {score2}")
 
         if force or self.arduino_state is None or self.arduino_state["active_player"] != active_player:
             self.arduino.send_command("LIGHTOFF")
