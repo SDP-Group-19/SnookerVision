@@ -284,9 +284,11 @@ def main():
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             break
-        elif key == ord("r") and state_manager.foul_reposition_active:
-            # Skip current ball or clear if last one
-            state_manager.skip_reposition_target()
+        elif key == ord("r"):
+            if state_manager.foul_reposition_active:
+                state_manager.skip_reposition_target()
+            else:
+                state_manager.start_last_position_reposition()
 
     camera.release()
     cv2.destroyAllWindows()

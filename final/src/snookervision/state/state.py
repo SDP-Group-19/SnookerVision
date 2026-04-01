@@ -3,6 +3,7 @@ import logging
 import math
 import numpy as np
 from snookervision.arduino.host.display_bridge import ArduinoDisplayBridge
+from snookervision.foul_logic import build_reposition_queue, snapshot_positions
 from snookervision.game_logic.game_logic import (
     BallType,
     Event,
@@ -73,6 +74,7 @@ class StateManager():
         self.zero_red_since = None
         self.arduino = None
         self.arduino_state = None
+        self.current_balls_snapshot = {}
         self.pocket_names = [
             "top_left",
             "top_middle",
@@ -141,10 +143,12 @@ class StateManager():
         self.not_moved_counter = 0
 
         if not detections:
+            self.current_balls_snapshot = {}
             self._update_hit_order({}, current_time)
             pot_notifications = self._update_tracks_and_detect_pots(balls, current_time)
             self._feed_game_logic(balls, pot_notifications, current_time)
             self._notify_pots(pot_notifications)
+            self._poll_display_events()
             self._rebuild_overlay_lines()
             self._sync_arduino_display()
             return
@@ -182,10 +186,12 @@ class StateManager():
         pot_notifications = self._update_tracks_and_detect_pots(balls, current_time)
         self._feed_game_logic(balls, pot_notifications, current_time)
         self._notify_pots(pot_notifications)
+        self.current_balls_snapshot = snapshot_positions(balls)
         if self.foul_flash_active:
             self._check_foul_flash(current_time, balls)
         if self.foul_reposition_active:
             self._check_reposition_progress(balls, current_time)
+        self._poll_display_events()
         self._rebuild_overlay_lines()
         self._sync_arduino_display()
 
@@ -543,6 +549,46 @@ class StateManager():
         )
         self._light_current_reposition_target()
 
+    def start_last_position_reposition(self):
+        if not self.shot_start_positions:
+            logger.info("[LED] No shot-start snapshot available for last-position restore")
+            return False
+
+        threshold = max(10, int(getattr(self.config, "led_reposition_threshold_px", 40)))
+        queue = build_reposition_queue(
+            self.shot_start_positions,
+            self.current_balls_snapshot,
+            threshold,
+        )
+        if not queue:
+            logger.info("[LED] No displaced balls found for last-position restore")
+            return False
+
+        self.reposition_queue = [
+            {
+                "color_name": target.color_name,
+                "x": target.x,
+                "y": target.y,
+                "led_color": target.led_color,
+            }
+            for target in queue
+        ]
+        self.reposition_index = 0
+        self.reposition_confirm_count = 0
+        self.foul_reposition_active = True
+        self.reposition_hold_active = False
+        self.reposition_hold_start = None
+        logger.info(
+            "[LED] Last-position queue: %s",
+            ", ".join(f"{q['color_name']}@({q['x']},{q['y']})" for q in self.reposition_queue),
+        )
+        if self.led_controller:
+            self.led_controller.send_clear()
+        self._light_current_reposition_target()
+        self._rebuild_overlay_lines()
+        self._sync_arduino_display(force=True)
+        return True
+
     def _light_current_reposition_target(self):
         """Send the current queue entry's position+colour to the LED strips."""
         if not self.led_controller:
@@ -640,6 +686,25 @@ class StateManager():
             if self.led_controller:
                 self.led_controller.send_clear()
             self._light_current_reposition_target()
+
+    def _poll_display_events(self):
+        if self.arduino is None or not hasattr(self.arduino, "poll_events"):
+            return
+
+        for event in self.arduino.poll_events():
+            self.handle_display_event(event)
+
+    def handle_display_event(self, event):
+        normalized = (event or "").strip().upper()
+        if not normalized:
+            return
+
+        logger.info("[DISPLAY] Event: %s", normalized)
+        if normalized == "LAST_POSITION":
+            if self.foul_reposition_active:
+                self.skip_reposition_target()
+            else:
+                self.start_last_position_reposition()
 
     def _feed_game_logic(self, balls, pot_notifications, now):
         if any((n.get("colour") or "").lower() == "red" for n in pot_notifications):
@@ -840,6 +905,12 @@ class StateManager():
         frame = self.game_state.current_frame
         if frame is None:
             return "SnookerVision", "No frame"
+
+        if self.foul_reposition_active and self.reposition_index < len(self.reposition_queue):
+            target = self.reposition_queue[self.reposition_index]
+            line1 = f"Replace {target['color_name']}"
+            line2 = f"{self.reposition_index + 1}/{len(self.reposition_queue)}"
+            return self._sanitize_lcd_text(line1), self._sanitize_lcd_text(line2)
 
         if time.time() < self.show_foul_until:
             return self._sanitize_lcd_text("Foul!!!"), self._sanitize_lcd_text("")

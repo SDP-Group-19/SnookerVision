@@ -90,6 +90,7 @@ int score2 = 0;
 String inputBuffer;
 String currentLcdLine1 = "";
 String currentLcdLine2 = "";
+String pendingEvents = "";
 unsigned long lastWifiAttemptAt = 0;
 
 int clampScore(int score) {
@@ -282,6 +283,19 @@ void handleStatusRequest() {
   server.send(200, "text/plain", buildStatus());
 }
 
+void enqueueEvent(const String &eventName) {
+  if (pendingEvents.length() > 0) {
+    pendingEvents += '\n';
+  }
+  pendingEvents += eventName;
+}
+
+void handleEventsRequest() {
+  const String response = pendingEvents;
+  pendingEvents = "";
+  server.send(200, "text/plain", response);
+}
+
 void ensureWifiConnected() {
   if (WiFi.status() == WL_CONNECTED) {
     return;
@@ -312,6 +326,7 @@ void connectWifiBlocking() {
 
 void setupServer() {
   server.on("/status", HTTP_GET, handleStatusRequest);
+  server.on("/events", HTTP_GET, handleEventsRequest);
   server.on("/command", HTTP_POST, handleCommandRequest);
   server.on("/command", HTTP_GET, []() {
     const String response = executeCommand(server.arg("cmd"));
@@ -352,6 +367,8 @@ void handleButton(ButtonState &button) {
     if (isPressed(button)) {
       if (button.action == ButtonAction::AddLeft) {
         addScore(1, button.delta);
+      } else if (button.action == ButtonAction::LastPosition) {
+        enqueueEvent("LAST_POSITION");
       }
 
       Serial.println(button.message);
