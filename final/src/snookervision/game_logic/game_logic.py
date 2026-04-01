@@ -1,7 +1,10 @@
+import logging
 import time
 from threading import Event
 
 import paho.mqtt.publish as publish
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import List, Optional, Tuple, Set
@@ -160,13 +163,13 @@ class FrameState:
         self.activePlayer, self.opponent = self.opponent, self.activePlayer
         # Incoming player's target should be the current ball_on (can be COLOUR, not always RED).
         self._sync_targets()
-        print(f"TEST NEXT TARGET: {self.activePlayer.target}")
+        logger.debug(f"Next target: {self.activePlayer.target}")
 
     def get_next_target(self, just_potted_red: bool):
         # Backwards-compatible signature.
         # We now drive target from self.ball_on (updated by the rule engine).
         self._sync_targets()
-        print(f"TEST NEXT TARGET: {self.activePlayer.target}")
+        logger.debug(f"Next target: {self.activePlayer.target}")
 
 @dataclass
 class GameState:

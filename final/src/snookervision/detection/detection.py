@@ -52,7 +52,19 @@ class DetectionModel:
         )
         self.total_objects = 0
         self.total_balls = 0
-        self.hole_positions = [
+        self.hole_positions = self._init_pocket_positions()
+        self.frame_count = 0
+        self.found_holes = []
+        self.last_result = None
+        self.ball_class_names = {
+            "white", "black", "red", "yellow", "green", "brown", "blue", "pink"
+        }
+        self._last_pocket_filter_log = {}  # throttle pocket filter logging
+
+    def _init_pocket_positions(self):
+        if config.pocket_pts is not None:
+            return list(config.pocket_pts)
+        return [
             (0, 0),
             (config.output_dimensions[0] // 2, 0),
             (config.output_dimensions[0], 0),
@@ -60,12 +72,13 @@ class DetectionModel:
             (config.output_dimensions[0] // 2, config.output_dimensions[1]),
             (config.output_dimensions[0], config.output_dimensions[1]),
         ]
-        self.frame_count = 0
-        self.found_holes = []
-        self.last_result = None
-        self.ball_class_names = {
-            "white", "black", "red", "yellow", "green", "brown", "blue", "pink"
-        }
+
+    def _is_near_pocket(self, cx, cy):
+        radius = config.pocket_filter_radius_px
+        for px, py in self.hole_positions:
+            if (cx - px) ** 2 + (cy - py) ** 2 <= radius ** 2:
+                return True
+        return False
 
     def _normalize_labels(self, names):
         """Normalize model class names so the rest of the codebase works.
@@ -200,6 +213,12 @@ class DetectionModel:
 
                 if classname in {"white", "black", "red", "yellow", "green", "brown", "blue", "pink"} \
                         and self._is_likely_ball(area):
+                    cx, cy = result["center"]
+                    if self._is_near_pocket(cx, cy):
+                        if self._last_pocket_filter_log.get(classname) != self.frame_count - 1:
+                            logger.info(f"[POCKET] {classname} filtered at ({cx}, {cy}) — inside pocket zone")
+                        self._last_pocket_filter_log[classname] = self.frame_count
+                        continue
                     counts[classname] += 1
                     filtered_results.append(result)
                     self.total_balls += 1

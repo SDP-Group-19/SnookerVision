@@ -57,6 +57,7 @@ class StateManager():
         self.shot_last_motion_time = None
         self.shot_stopped_at = None
         self.first_object_hit_colour = None
+        self.second_object_hit_colour = None
         self.live_overlay_lines = []
         self.last_potted_text = "-"
         self.last_ball_hit_text = "-"
@@ -246,6 +247,8 @@ class StateManager():
         return matched_pairs, unmatched_track_ids, unmatched_obs_idxs
 
     def _pocket_centers(self):
+        if self.config.pocket_pts is not None:
+            return [{"x": int(p[0]), "y": int(p[1])} for p in self.config.pocket_pts]
         w, h = self.config.output_dimensions
         return [
             {"x": 0, "y": 0},
@@ -274,6 +277,7 @@ class StateManager():
         events = []
         match_threshold = max(8, int(self.config.pot_tracking_match_px))
         pocket_threshold = max(10, int(self.config.pot_pocket_radius_px))
+        pocket_filter = max(10, int(self.config.pocket_filter_radius_px))
         missing_seconds = max(0.2, float(self.config.pot_missing_seconds))
         stale_seconds = max(missing_seconds + 0.5, float(self.config.pot_track_stale_seconds))
         non_red_cooldown = max(
@@ -316,7 +320,11 @@ class StateManager():
                         track["pocket_idx"] = None
 
             for obs_idx in unmatched_obs_idxs:
-                self._create_track(colour, observations[obs_idx], now)
+                obs = observations[obs_idx]
+                _, pocket_dist = self._nearest_pocket(obs)
+                if pocket_dist <= pocket_filter:
+                    continue
+                self._create_track(colour, obs, now)
 
         stale_track_ids = []
         for track_id, track in self.ball_tracks.items():
@@ -471,6 +479,7 @@ class StateManager():
             return
 
         # Check CV: each potted colour must NOT be detected on the table
+        pocket_threshold = max(10, int(self.config.pocket_filter_radius_px))
         for color in self.foul_potted_colors:
             detected = balls.get(color, [])
             if color == "red":
@@ -479,7 +488,12 @@ class StateManager():
                 # the exact count that was potted here, just skip reds — they
                 # aren't re-spotted anyway.
                 continue
-            if detected:
+            # Ignore detections near pocket positions (likely false positives)
+            real_detections = [
+                d for d in detected
+                if self._nearest_pocket(d)[1] > pocket_threshold
+            ]
+            if real_detections:
                 # Ball still visible on table — keep FOUL lit
                 return
 
@@ -759,6 +773,7 @@ class StateManager():
             self.shot_last_motion_time = now
             self.shot_stopped_at = None
             self.first_object_hit_colour = None
+            self.second_object_hit_colour = None
 
         if self.shot_active:
             if any_moving:
@@ -769,7 +784,10 @@ class StateManager():
                     continue
                 if self.first_object_hit_colour is None:
                     self.first_object_hit_colour = colour
-                    break
+                    logger.info(f"[HIT] 1st ball hit: {colour.upper()}")
+                elif self.second_object_hit_colour is None and colour != self.first_object_hit_colour:
+                    self.second_object_hit_colour = colour
+                    logger.info(f"[HIT] 2nd ball hit: {colour.upper()}")
 
             if self.shot_last_motion_time is not None and (now - self.shot_last_motion_time) >= reset_seconds:
                 self.shot_active = False
@@ -940,9 +958,9 @@ class StateManager():
                 self.state.network.send_corrected_white_ball(
                     corrected_white_ball)
         else:
-            logger.info(f"Sending balls: {balls}")
+            logger.debug(f"Sending balls: {balls}")
             if corrected_white_ball:
-                logger.info(
+                logger.debug(
                     f"Sending corrected white ball: {corrected_white_ball}")
 
     def _handle_offset(self, middlex, middley, x_ratio, y_ratio):

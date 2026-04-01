@@ -226,6 +226,20 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--no-pocket-pts",
+        action="store_true",
+        help="Skip pocket point selection; use default corner positions.",
+        default=False
+    )
+
+    parser.add_argument(
+        "--select-pocket-pts",
+        action="store_true",
+        help="Force reselecting pocket points and overwrite saved points.",
+        default=False
+    )
+
+    parser.add_argument(
         "--overlay-only",
         action="store_true",
         help="Show only the generated table overlay window, not the live camera view.",

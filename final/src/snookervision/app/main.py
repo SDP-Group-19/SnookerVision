@@ -15,6 +15,7 @@ from snookervision.processing import (
     handle_calibration,
     undistort_frame,
     manage_point_selection,
+    manage_pocket_selection,
 )
 
 from snookervision.detection import DetectionModel
@@ -135,6 +136,15 @@ def main():
     else:
         config.use_table_pts = False
 
+    # Handle pocket point selection
+    pocket_force = getattr(args, "select_pocket_pts", False)
+    if not getattr(args, "no_pocket_pts", False):
+        pocket_pts = manage_pocket_selection(processed_frame, force_reselect=pocket_force)
+        if pocket_pts is not None:
+            config.pocket_pts = pocket_pts
+            logger.info(f"Using {len(pocket_pts)} pocket positions for filtering.")
+        else:
+            logger.warning("Pocket points not selected. Using default positions.")
 
     detection_model = DetectionModel()
     if detection_model.model is None:

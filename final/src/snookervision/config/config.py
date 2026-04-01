@@ -57,7 +57,7 @@ class Config:
         self.pot_missing_seconds = 2.0
         self.pot_track_stale_seconds = 6.0
         self.pot_tracking_match_px = 22
-        self.pot_pocket_radius_px = 80
+        self.pot_pocket_radius_px = 45
         self.non_red_pot_cooldown_seconds = 3.0
         self.no_reds_confirm_seconds = 1.0
         self.hit_motion_threshold_px = 10
@@ -71,6 +71,9 @@ class Config:
         self.calibration_params_path = "final/src/snookervision/data/calibration_params.json"
         self.calibration_images_path = "final/src/snookervision/data/calibration_images/"
         self.table_pts_path = "final/src/snookervision/data/table_pts.json"
+        self.pocket_pts_path = "final/src/snookervision/data/pocket_pts.json"
+        self.pocket_pts = None
+        self.pocket_filter_radius_px = 30
         # LED strip settings (ESP32 via TCP)
         self.led_enabled = False
         self.led_arduino_ip = "192.168.4.1"

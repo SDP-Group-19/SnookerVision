@@ -243,6 +243,105 @@ def manage_point_selection(frame, force_reselect=False):
     return np.array(sorted_pts, dtype=np.float32)
 
 
+def load_pocket_pts():
+    if not os.path.exists(config.pocket_pts_path):
+        logger.warning(
+            f"{config.pocket_pts_path} does not exist. Please select pocket points."
+        )
+        return None
+
+    try:
+        with open(config.pocket_pts_path, "r") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.error(
+            f"Failed to load pocket points from {config.pocket_pts_path}: {e}. "
+            "Please reselect pocket points."
+        )
+        return None
+
+    try:
+        pts = data["pocket_pts"]
+        if len(pts) != 6:
+            logger.error("Expected 6 pocket points, got %d.", len(pts))
+            return None
+        return [(int(p[0]), int(p[1])) for p in pts]
+    except (KeyError, TypeError, ValueError):
+        logger.error("Invalid pocket points format. Please select again.")
+        return None
+
+
+def save_pocket_pts(pocket_pts):
+    data = {"pocket_pts": [[int(x), int(y)] for x, y in pocket_pts]}
+    try:
+        os.makedirs(os.path.dirname(config.pocket_pts_path), exist_ok=True)
+        with open(config.pocket_pts_path, "w") as f:
+            json.dump(data, f, indent=4)
+        logger.info(f"Pocket points saved to {config.pocket_pts_path}.")
+    except Exception as e:
+        logger.error(f"Error saving pocket points: {e}")
+
+
+def _select_pocket_points(event, x, y, _, param):
+    pocket_pts = param
+    if event == cv2.EVENT_LBUTTONDOWN and len(pocket_pts) < 6:
+        pocket_pts.append((x, y))
+        logger.info(f"Pocket point {len(pocket_pts)} selected: {x}, {y}")
+
+
+def manage_pocket_selection(frame, force_reselect=False):
+    pocket_pts = None if force_reselect else load_pocket_pts()
+    if pocket_pts is not None:
+        return pocket_pts
+
+    pocket_pts = []
+    cv2.namedWindow("Select 6 Pocket Points")
+    cv2.setMouseCallback("Select 6 Pocket Points", _select_pocket_points, pocket_pts)
+    logger.info("Click the center of each of the 6 pockets (any order).")
+
+    while True:
+        display = frame.copy()
+        for i, pt in enumerate(pocket_pts):
+            cv2.circle(display, pt, 8, (0, 0, 255), -1)
+            cv2.putText(
+                display,
+                f"P{i+1}",
+                (pt[0] + 10, pt[1] - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 255),
+                2,
+            )
+
+        remaining = 6 - len(pocket_pts)
+        cv2.putText(
+            display,
+            f"Select {remaining} more pocket(s)" if remaining > 0 else "Press Enter to confirm",
+            (20, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 255),
+            2,
+        )
+
+        cv2.imshow("Select 6 Pocket Points", display)
+        key = cv2.waitKey(1) & 0xFF
+
+        if (key == ord("\n") or key == ord("\r")) and len(pocket_pts) == 6:
+            break
+        if key in (8, 127) and len(pocket_pts) > 0:
+            logger.info(f"Pocket point {pocket_pts[-1]} removed.")
+            pocket_pts.pop()
+        if key == ord("q"):
+            logger.info("Pocket selection cancelled.")
+            cv2.destroyWindow("Select 6 Pocket Points")
+            return None
+
+    save_pocket_pts(pocket_pts)
+    cv2.destroyWindow("Select 6 Pocket Points")
+    return pocket_pts
+
+
 def sort_points(table_pts):
     pts = np.array(table_pts, dtype=np.float32)
     if pts.shape != (4, 2):
