@@ -261,6 +261,48 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--pocket-sensors-enabled",
+        action="store_true",
+        default=config.pocket_sensor_enabled,
+        help="Enable MQTT pocket sensors to confirm pot decisions.",
+    )
+
+    parser.add_argument(
+        "--mqtt-broker",
+        type=str,
+        default=config.mqtt_broker,
+        help="MQTT broker hostname for pocket sensors.",
+    )
+
+    parser.add_argument(
+        "--mqtt-port",
+        type=int,
+        default=config.mqtt_port,
+        help="MQTT broker port for pocket sensors.",
+    )
+
+    parser.add_argument(
+        "--mqtt-username",
+        type=str,
+        default=config.mqtt_username,
+        help="MQTT username for pocket sensors.",
+    )
+
+    parser.add_argument(
+        "--mqtt-password",
+        type=str,
+        default=config.mqtt_password,
+        help="MQTT password for pocket sensors.",
+    )
+
+    parser.add_argument(
+        "--pocket-sensor-topic",
+        type=str,
+        default=config.pocket_sensor_topic,
+        help="MQTT topic that receives pocket sensor JSON events.",
+    )
+
+    parser.add_argument(
         "--led-enabled",
         action="store_true",
         default=config.led_enabled,

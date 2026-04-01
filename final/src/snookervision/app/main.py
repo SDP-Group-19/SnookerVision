@@ -57,6 +57,12 @@ def main():
     config.draw_results = not args.no_draw_results
     config.show_generated_table = args.show_generated_table
     config.use_calibration = args.use_calibration
+    config.pocket_sensor_enabled = args.pocket_sensors_enabled
+    config.mqtt_broker = args.mqtt_broker
+    config.mqtt_port = args.mqtt_port
+    config.mqtt_username = args.mqtt_username
+    config.mqtt_password = args.mqtt_password
+    config.pocket_sensor_topic = args.pocket_sensor_topic
     config.led_enabled = args.led_enabled
     config.led_arduino_ip = args.led_ip
     config.led_arduino_port = args.led_port

@@ -74,6 +74,13 @@ class Config:
         self.pocket_pts_path = "final/src/snookervision/data/pocket_pts.json"
         self.pocket_pts = None
         self.pocket_filter_radius_px = 30
+        self.pocket_sensor_enabled = False
+        self.pocket_sensor_topic = "pockets/esp"
+        self.pocket_sensor_match_seconds = 2.5
+        self.mqtt_broker = "d35b0b7f3a0e43aeaa83cbe44fe9e73b.s1.eu.hivemq.cloud"
+        self.mqtt_port = 8883
+        self.mqtt_username = "SDPgroup19"
+        self.mqtt_password = "SDPgroup543"
         # LED strip settings (ESP32 via TCP)
         self.led_enabled = False
         self.led_arduino_ip = "192.168.4.1"
