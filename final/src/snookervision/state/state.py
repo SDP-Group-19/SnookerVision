@@ -4,7 +4,6 @@ import math
 import numpy as np
 from snookervision.arduino.host.display_bridge import ArduinoDisplayBridge
 from snookervision.foul_logic import build_reposition_queue, snapshot_positions
-from snookervision.state.pocket_sensor import PocketSensor
 from snookervision.game_logic.game_logic import (
     BallType,
     Event,
@@ -81,6 +80,7 @@ class StateManager():
         self.pocket_sensor = None
         self.pending_pocket_triggers = []
         self.current_balls_snapshot = {}
+        self.last_stable_balls_snapshot = {}
         self.pocket_names = [
             "top_left",
             "top_middle",
@@ -260,6 +260,8 @@ class StateManager():
 
         if not detections:
             self.current_balls_snapshot = {}
+            if not self.shot_active:
+                self.last_stable_balls_snapshot = {}
             self._update_hit_order({}, current_time)
             pot_notifications = self._update_tracks_and_detect_pots(balls, current_time)
             pot_notifications.extend(self.trigger_pot_events)
@@ -301,12 +303,14 @@ class StateManager():
             self.previous_state = balls
 
         self._update_hit_order(balls, current_time)
+        self.current_balls_snapshot = snapshot_positions(balls)
+        if not self.shot_active:
+            self.last_stable_balls_snapshot = snapshot_positions(balls)
         pot_notifications = self._update_tracks_and_detect_pots(balls, current_time)
         pot_notifications.extend(self.trigger_pot_events)
         self.trigger_pot_events.clear()
         self._feed_game_logic(balls, pot_notifications, current_time)
         self._notify_pots(pot_notifications)
-        self.current_balls_snapshot = snapshot_positions(balls)
         if self.foul_flash_active:
             self._check_foul_flash(current_time, balls)
         if self.foul_reposition_active:
@@ -860,12 +864,26 @@ class StateManager():
             return
         target = self.reposition_queue[self.reposition_index]
         r, g, b = target["led_color"]
-        self.led_controller.send_ball(target["x"], target["y"], r, g, b)
+        led_input_x, led_input_y = self._led_input_coords(target["x"], target["y"])
+        self.led_controller.send_ball(led_input_x, led_input_y, r, g, b)
         logger.info(
             f"[LED] Lighting {target['color_name'].upper()} "
             f"at ({target['x']}, {target['y']}) "
             f"[{self.reposition_index + 1}/{len(self.reposition_queue)}]"
         )
+
+    def _led_input_coords(self, x, y):
+        if self.config is None:
+            return x, y
+
+        width, height = self.config.output_dimensions
+        led_x = int(max(0, min(x, width)))
+        led_y = int(max(0, min(y, height)))
+
+        if getattr(self.config, "use_table_pts", False):
+            led_y = height - led_y
+
+        return led_x, led_y
 
     def _check_reposition_progress(self, balls, now):
         """Check if the current target ball has been placed near its position.
@@ -1025,6 +1043,7 @@ class StateManager():
         self.red_potted_ever = False
         self.zero_red_since = None
         self.current_balls_snapshot = {}
+        self.last_stable_balls_snapshot = {}
         self.shot_start_positions = {}
         self._rebuild_overlay_lines()
         self._sync_arduino_display(force=True)
@@ -1040,10 +1059,15 @@ class StateManager():
             if self.foul_flash_active or self.foul_reposition_active:
                 self.clear_foul_leds()
             # Snapshot ball positions before the shot changes anything
-            if self.previous_state:
+            source_snapshot = (
+                self.last_stable_balls_snapshot
+                or self.previous_state
+                or self.current_balls_snapshot
+            )
+            if source_snapshot:
                 self.shot_start_positions = {
                     c: [dict(p) for p in positions]
-                    for c, positions in self.previous_state.items()
+                    for c, positions in source_snapshot.items()
                 }
             outputs = self.rule_engine.on_event(Event(now, EventType.SHOT_START))
             self._push_game_outputs(outputs)
